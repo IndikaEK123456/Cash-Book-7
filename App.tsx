@@ -20,7 +20,7 @@ const createDefaultDay = (openingBalance: number = 0): DailyData => ({
 });
 
 const App: React.FC = () => {
-  // 1. COMPREHENSIVE INITIALIZATION (Prevents Production Crashes)
+  // Device mode state
   const [role, setRole] = useState<DeviceRole>(() => {
     try {
       const saved = localStorage.getItem('shivas_device_mode');
@@ -31,6 +31,7 @@ const App: React.FC = () => {
     }
   });
 
+  // App data state
   const [appState, setAppState] = useState<AppState>(() => {
     const defaultState: AppState = {
       currentDay: createDefaultDay(),
@@ -47,28 +48,26 @@ const App: React.FC = () => {
       const parsed = JSON.parse(saved);
       if (!parsed || typeof parsed !== 'object') return defaultState;
 
-      // Deep Merge / Sanitization to ensure arrays exist
       return {
         ...defaultState,
         ...parsed,
         currentDay: {
           ...defaultState.currentDay,
           ...(parsed.currentDay || {}),
-          outPartyEntries: parsed.currentDay?.outPartyEntries || [],
-          mainEntries: parsed.currentDay?.mainEntries || []
+          outPartyEntries: Array.isArray(parsed.currentDay?.outPartyEntries) ? parsed.currentDay.outPartyEntries : [],
+          mainEntries: Array.isArray(parsed.currentDay?.mainEntries) ? parsed.currentDay.mainEntries : []
         },
         history: Array.isArray(parsed.history) ? parsed.history : [],
         rates: parsed.rates || defaultState.rates
       };
     } catch (e) {
-      console.error("State recovery failed:", e);
       return defaultState;
     }
   });
 
-  // 2. REAL-TIME CLOUD SYNC SIMULATION
+  // SYNC: Automatic reconnection across tabs and devices (simulation)
   useEffect(() => {
-    const handleSync = (e: StorageEvent) => {
+    const handleStorageSync = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY && e.newValue) {
         try {
           const newState = JSON.parse(e.newValue);
@@ -78,52 +77,54 @@ const App: React.FC = () => {
         } catch (err) {}
       }
     };
-    window.addEventListener('storage', handleSync);
+    window.addEventListener('storage', handleStorageSync);
 
-    const channel = new BroadcastChannel('shivas_cloud_relay');
-    channel.onmessage = (e) => {
+    const relay = new BroadcastChannel('shivas_cloud_relay');
+    relay.onmessage = (e) => {
       if (e.data?.cabinId === appState.cabinId && e.data?.state) {
         setAppState(prev => ({ ...prev, ...e.data.state }));
       }
     };
 
     return () => {
-      window.removeEventListener('storage', handleSync);
-      channel.close();
+      window.removeEventListener('storage', handleStorageSync);
+      relay.close();
     };
   }, [appState.cabinId]);
 
+  // Save changes and broadcast to other paired devices/tabs
   useEffect(() => {
     if (appState.isPaired) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
-      const channel = new BroadcastChannel('shivas_cloud_relay');
-      channel.postMessage({ cabinId: appState.cabinId, state: appState });
+      const relay = new BroadcastChannel('shivas_cloud_relay');
+      relay.postMessage({ cabinId: appState.cabinId, state: appState });
     }
   }, [appState]);
 
-  // Exchange Rates (Rule 12)
+  // Initial fetch of exchange rates
   useEffect(() => {
-    fetchLiveExchangeRates().then(rates => {
+    const getRates = async () => {
+      const rates = await fetchLiveExchangeRates();
       setAppState(prev => ({ ...prev, rates }));
-    });
+    };
+    getRates();
   }, []);
 
-  // 3. LOGIC & PERMISSIONS
   const isLaptop = role === DeviceRole.LAPTOP;
   const totals = useMemo(() => calculateTotals(appState.currentDay), [appState.currentDay]);
 
   const pairDevice = (id: string) => {
     const cleanId = id.trim().toUpperCase();
-    if (!cleanId) return alert("Please enter a valid ID");
+    if (!cleanId) return alert("Please enter a Cabin ID");
     setAppState(prev => ({ ...prev, cabinId: cleanId, isPaired: true }));
   };
 
-  const switchMode = (newMode: DeviceRole) => {
-    setRole(newMode);
-    localStorage.setItem('shivas_device_mode', newMode);
+  const setDeviceRole = (newRole: DeviceRole) => {
+    setRole(newRole);
+    localStorage.setItem('shivas_device_mode', newRole);
   };
 
-  // 4. CRUD OPERATIONS (Laptop Only)
+  // CRUD Actions (Only allowed for Laptop/Editor)
   const addOutParty = () => {
     if (!isLaptop) return;
     const newEntry: OutPartyEntry = {
@@ -176,149 +177,159 @@ const App: React.FC = () => {
     }));
   };
 
-  const deleteEntry = (id: string, section: 'OP' | 'MAIN') => {
+  const deleteEntry = (id: string, isOutParty: boolean) => {
     if (!isLaptop) return;
-    if (!window.confirm("Delete this entry?")) return;
+    if (!window.confirm("Delete this record?")) return;
     setAppState(prev => ({
       ...prev,
       currentDay: {
         ...prev.currentDay,
-        outPartyEntries: section === 'OP' ? prev.currentDay.outPartyEntries.filter(e => e.id !== id) : prev.currentDay.outPartyEntries,
-        mainEntries: section === 'MAIN' ? prev.currentDay.mainEntries.filter(e => e.id !== id) : prev.currentDay.mainEntries,
+        outPartyEntries: isOutParty ? prev.currentDay.outPartyEntries.filter(e => e.id !== id) : prev.currentDay.outPartyEntries,
+        mainEntries: !isOutParty ? prev.currentDay.mainEntries.filter(e => e.id !== id) : prev.currentDay.mainEntries,
       }
     }));
   };
 
   const handleDayEnd = () => {
     if (!isLaptop) return;
-    if (!window.confirm("Perform Day End? Today's data will be saved and cleared.")) return;
+    if (!window.confirm("Confirm DAY END? This will archive today's data and start a fresh book.")) return;
     setAppState(prev => ({
       ...prev,
-      history: [...prev.history, prev.currentDay],
+      history: [prev.currentDay, ...prev.history],
       currentDay: createDefaultDay(totals.finalBalance)
     }));
   };
 
-  const formatLKR = (val: number) => {
-    if (!val || val === 0) return 'Rs 0';
+  const formatRs = (val: number) => {
+    if (val === 0) return '';
     return `Rs ${val.toLocaleString()}`;
   };
 
   // --- PAIRING SCREEN ---
   if (!appState.isPaired) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-        <div className="bg-slate-900 border border-slate-800 p-8 md:p-12 rounded-[2.5rem] shadow-2xl max-w-md w-full text-center">
-          <h1 className="text-4xl font-black text-sky-400 mb-2 tracking-tighter">SHIVAS BEACH</h1>
-          <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mb-12">Universal Cloud Cash Book</p>
-          <input 
-            type="text" 
-            placeholder="ENTER CABIN ID" 
-            className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-6 py-5 text-white font-black text-center mb-6 focus:border-sky-500 outline-none uppercase text-xl placeholder:text-slate-600"
-            onKeyDown={(e) => e.key === 'Enter' && pairDevice((e.target as HTMLInputElement).value)}
-          />
-          <button 
-            onClick={() => {
-              const val = (document.querySelector('input') as HTMLInputElement).value;
-              pairDevice(val);
-            }}
-            className="w-full bg-sky-500 hover:bg-sky-400 text-slate-950 font-black py-5 rounded-2xl transition-all shadow-lg active:scale-95 text-lg"
-          >
-            PAIR & CONNECT
-          </button>
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6">
+        <div className="bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl max-w-md w-full border-t-8 border-sky-500">
+          <div className="text-center mb-10">
+            <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Shivas Beach</h1>
+            <p className="text-sky-600 font-bold text-xs uppercase tracking-widest mt-1">Cloud Sync Terminal</p>
+          </div>
+          <div className="space-y-6">
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Assign Device ID</label>
+              <input 
+                type="text" 
+                placeholder="E.G. BEACH-01" 
+                className="w-full bg-slate-50 border-2 border-slate-200 rounded-2xl px-6 py-4 text-slate-900 font-black text-center focus:border-sky-500 outline-none uppercase text-xl placeholder:text-slate-300"
+                onKeyDown={(e) => e.key === 'Enter' && pairDevice((e.target as HTMLInputElement).value)}
+              />
+            </div>
+            <button 
+              onClick={() => pairDevice((document.querySelector('input') as HTMLInputElement).value)}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-5 rounded-2xl transition-all shadow-xl active:scale-95 text-lg"
+            >
+              INITIALIZE SYNC
+            </button>
+            <p className="text-[10px] text-slate-400 text-center font-bold px-4 leading-relaxed">
+              Use the same ID on your Laptop and Mobile devices to connect them automatically.
+            </p>
+          </div>
         </div>
       </div>
     );
   }
 
-  // --- MAIN DASHBOARD ---
+  // --- MAIN APP ---
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-950 font-bold">
-      <header className="bg-slate-950 text-white p-5 sticky top-0 z-50 shadow-2xl">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="text-center md:text-left">
-            <h1 className="text-2xl md:text-3xl font-black tracking-tighter text-sky-400">SHIVAS BEACH CABANAS</h1>
-            <div className="flex flex-wrap justify-center md:justify-start gap-4 text-[11px] font-black uppercase opacity-80 mt-1">
-              <span className="bg-slate-800 px-2 py-0.5 rounded text-white">{appState.currentDay.date}</span>
-              <span className="text-sky-300">USD {appState.rates.usd} LKR</span>
-              <span className="text-indigo-300">EURO {appState.rates.euro} LKR</span>
+    <div className="min-h-screen pb-20">
+      {/* Header (Rule 9, 12) */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl md:text-2xl font-black text-slate-950 tracking-tighter uppercase italic">SHIVAS BEACH CABANAS</h1>
+            <div className="flex gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">
+              <span>{appState.currentDay.date}</span>
+              <span className="text-blue-500">USD {appState.rates.usd}</span>
+              <span className="text-indigo-500">EURO {appState.rates.euro}</span>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-xl text-xs font-black border border-emerald-500/30 flex items-center gap-2">
-              <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-sm shadow-emerald-500"></span>
-              ID: {appState.cabinId}
-            </div>
-            <select 
-              value={role} 
-              onChange={(e) => switchMode(e.target.value as DeviceRole)}
-              className="bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-black uppercase outline-none focus:ring-2 ring-sky-500 cursor-pointer"
-            >
-              <option value={DeviceRole.LAPTOP}>💻 LAPTOP (EDITOR)</option>
-              <option value={DeviceRole.MOBILE}>📱 MOBILE (VIEWER)</option>
-            </select>
+             <div className="hidden md:flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                <span className="text-[10px] font-black text-emerald-600 uppercase">Linked: {appState.cabinId}</span>
+             </div>
+             <select 
+               value={role} 
+               onChange={(e) => setDeviceRole(e.target.value as DeviceRole)}
+               className="bg-slate-100 text-slate-900 text-xs font-black uppercase py-2 px-3 rounded-xl border-none outline-none cursor-pointer"
+             >
+               <option value={DeviceRole.LAPTOP}>💻 Laptop (Edit)</option>
+               <option value={DeviceRole.MOBILE}>📱 Mobile (View)</option>
+             </select>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-4 md:p-8 space-y-12">
+      <main className="max-w-7xl mx-auto p-4 md:p-6 space-y-10">
         
-        {/* OUT PARTY SECTION */}
-        <section className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
-          <div className="bg-slate-50 px-8 py-5 flex justify-between items-center border-b border-slate-200">
-            <h2 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em]">Out Party Section</h2>
+        {/* Out Party Section (Rule 5, 6, 8) */}
+        <section className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+            <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Out Party Entries</h2>
             {isLaptop && (
-              <button onClick={addOutParty} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-2xl text-xs font-black shadow-lg transition-all">+ ADD ENTRY</button>
+              <button onClick={addOutParty} className="bg-sky-600 hover:bg-sky-700 text-white text-[10px] font-black px-4 py-2 rounded-lg transition-all">+ NEW PARTY</button>
             )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
-              <thead>
-                <tr className="text-[11px] font-black text-slate-400 uppercase bg-slate-50/50 border-b">
-                  <th className="px-8 py-4 w-20">#</th>
-                  <th className="px-8 py-4">Method</th>
-                  <th className="px-8 py-4">Amount (Rs)</th>
-                  {isLaptop && <th className="px-8 py-4 text-right">Delete</th>}
+              <thead className="bg-slate-50/50 border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase">
+                <tr>
+                  <th className="px-6 py-4 w-16 text-center">#</th>
+                  <th className="px-6 py-4">Method</th>
+                  <th className="px-6 py-4">Amount (Rs)</th>
+                  {isLaptop && <th className="px-6 py-4 w-20 text-center">Action</th>}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100 text-slate-900 font-bold">
                 {appState.currentDay.outPartyEntries.map((entry, i) => (
-                  <tr key={entry.id} className="border-b last:border-0 hover:bg-slate-50/50">
-                    <td className="px-8 py-5 font-black text-slate-950 text-xl">{i + 1}</td>
-                    <td className="px-8 py-5">
+                  <tr key={entry.id} className="hover:bg-slate-50/50">
+                    <td className="px-6 py-4 text-center text-slate-400">{i + 1}</td>
+                    <td className="px-6 py-4">
                       {isLaptop ? (
                         <select 
                           value={entry.method} 
                           onChange={(e) => updateOutParty(entry.id, 'method', e.target.value as PaymentMethod)}
-                          className="bg-slate-100 font-black rounded-xl px-4 py-3 text-sm outline-none border-2 border-transparent focus:border-sky-500 w-full md:w-48"
+                          className="bg-white border border-slate-200 rounded-lg py-2 px-3 text-sm font-black w-full max-w-[150px]"
                         >
                           <option value={PaymentMethod.CASH}>CASH</option>
                           <option value={PaymentMethod.CARD}>CARD</option>
                           <option value={PaymentMethod.PAYPAL}>PAY PAL</option>
                         </select>
                       ) : (
-                        <span className={`px-4 py-1.5 rounded-full text-[11px] font-black uppercase ${
-                          entry.method === PaymentMethod.CASH ? 'bg-blue-100 text-blue-700' : 
-                          entry.method === PaymentMethod.CARD ? 'bg-yellow-100 text-yellow-700' : 'bg-purple-100 text-purple-700'
+                        <span className={`px-3 py-1 rounded-md text-[10px] font-black ${
+                          entry.method === PaymentMethod.CASH ? 'bg-blue-100 text-blue-700' :
+                          entry.method === PaymentMethod.CARD ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-purple-100 text-purple-700'
                         }`}>{entry.method}</span>
                       )}
                     </td>
-                    <td className="px-8 py-5">
+                    <td className="px-6 py-4">
                       {isLaptop ? (
                         <input 
                           type="number" 
                           value={entry.amount || ''} 
                           onChange={(e) => updateOutParty(entry.id, 'amount', Number(e.target.value))}
-                          className="bg-slate-100 font-black rounded-xl px-5 py-3 w-full outline-none border-2 border-transparent focus:border-sky-500 text-slate-950 text-lg"
+                          className="w-full max-w-[200px] border-b-2 border-transparent focus:border-sky-500 py-2 outline-none text-xl font-black bg-transparent"
+                          placeholder="0.00"
                         />
                       ) : (
-                        <span className="font-black text-slate-950 text-2xl">{formatLKR(entry.amount)}</span>
+                        <span className="text-xl font-black">{formatRs(entry.amount)}</span>
                       )}
                     </td>
                     {isLaptop && (
-                      <td className="px-8 py-5 text-right">
-                        <button onClick={() => deleteEntry(entry.id, 'OP')} className="text-red-400 hover:text-red-600 p-2 bg-red-50 rounded-lg transition-colors">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                      <td className="px-6 py-4 text-center">
+                        <button onClick={() => deleteEntry(entry.id, true)} className="text-red-300 hover:text-red-500 transition-colors">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>
                       </td>
                     )}
@@ -327,80 +338,79 @@ const App: React.FC = () => {
               </tbody>
             </table>
           </div>
-          
-          {/* OUT PARTY FOOTER */}
-          <div className="grid grid-cols-1 md:grid-cols-3 bg-slate-950 text-white">
-             <div className="p-8 border-r border-white/5 text-center">
-                <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">OP Cash Total</p>
-                <p className="text-3xl font-black">{formatLKR(totals.opCash)}</p>
-             </div>
-             <div className="p-8 border-r border-white/5 text-center bg-yellow-400/5">
-                <p className="text-[10px] font-black text-yellow-400 uppercase tracking-widest mb-1">OP Card Total</p>
-                <p className="text-3xl font-black text-yellow-500">{formatLKR(totals.opCard)}</p>
-             </div>
-             <div className="p-8 text-center bg-purple-400/5">
-                <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">OP PayPal Total</p>
-                <p className="text-3xl font-black text-purple-500">{formatLKR(totals.opPaypal)}</p>
-             </div>
+          {/* Out Party Summary Bars (Rule 7) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 bg-slate-50 border-t border-slate-200 font-black">
+            <div className="p-6 border-b md:border-b-0 md:border-r border-slate-200">
+              <p className="text-[10px] text-blue-500 uppercase tracking-widest mb-1">OP Cash Total</p>
+              <p className="text-2xl text-slate-900">{formatRs(totals.opCash) || 'Rs 0'}</p>
+            </div>
+            <div className="p-6 border-b md:border-b-0 md:border-r border-slate-200">
+              <p className="text-[10px] text-yellow-600 uppercase tracking-widest mb-1">OP Card Total</p>
+              <p className="text-2xl text-slate-900">{formatRs(totals.opCard) || 'Rs 0'}</p>
+            </div>
+            <div className="p-6">
+              <p className="text-[10px] text-purple-600 uppercase tracking-widest mb-1">OP PayPal Total</p>
+              <p className="text-2xl text-slate-900">{formatRs(totals.opPaypal) || 'Rs 0'}</p>
+            </div>
           </div>
         </section>
 
-        {/* MAIN SECTION */}
-        <section className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
-          <div className="bg-slate-50 px-8 py-5 flex justify-between items-center border-b border-slate-200">
-            <h2 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em]">Main Cash Flow</h2>
+        {/* Main Section (Rule 5, 10, 14, 15) */}
+        <section className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+            <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Main Cash Flow</h2>
             {isLaptop && (
-              <button onClick={addMainEntry} className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-2xl text-xs font-black shadow-lg transition-all">+ NEW ENTRY</button>
+              <button onClick={addMainEntry} className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black px-4 py-2 rounded-lg transition-all">+ NEW ENTRY</button>
             )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left table-fixed min-w-[1000px]">
-              <thead>
-                <tr className="text-[11px] font-black text-slate-400 uppercase bg-slate-50/50 border-b">
+              <thead className="bg-slate-50/50 border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase">
+                <tr>
                   <th className="px-6 py-4 w-28">Room No</th>
-                  <th className="px-6 py-4 w-[350px]">Descriptions</th>
+                  <th className="px-6 py-4 w-auto">Descriptions</th>
                   <th className="px-6 py-4 w-40">Method</th>
                   <th className="px-6 py-4 w-48">Cash In (Rs)</th>
                   <th className="px-6 py-4 w-48">Cash Out (Rs)</th>
-                  {isLaptop && <th className="px-6 py-4 w-20 text-right">Del</th>}
+                  {isLaptop && <th className="px-6 py-4 w-16"></th>}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100 text-slate-900 font-bold">
                 {appState.currentDay.mainEntries.map(entry => (
-                  <tr key={entry.id} className="border-b last:border-0 hover:bg-slate-50/50">
-                    <td className="px-6 py-5">
+                  <tr key={entry.id} className="hover:bg-slate-50/50">
+                    <td className="px-6 py-4">
                       {isLaptop ? (
-                        <input value={entry.roomNo} onChange={e => updateMainEntry(entry.id, 'roomNo', e.target.value)} className="w-full bg-slate-100 font-black p-4 text-sm rounded-xl outline-none focus:ring-2 ring-sky-500" placeholder="RM#"/>
-                      ) : <span className="font-black text-slate-900 text-xl">{entry.roomNo}</span>}
+                        <input value={entry.roomNo} onChange={e => updateMainEntry(entry.id, 'roomNo', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm font-black outline-none focus:border-sky-500" placeholder="RM #"/>
+                      ) : <span className="text-lg font-black">{entry.roomNo}</span>}
                     </td>
-                    <td className="px-6 py-5">
+                    <td className="px-6 py-4">
                       {isLaptop ? (
-                        <textarea value={entry.description} onChange={e => updateMainEntry(entry.id, 'description', e.target.value)} className="w-full bg-slate-100 font-black p-4 text-sm rounded-xl outline-none focus:ring-2 ring-sky-500 resize-none" rows={1} placeholder="Details..."/>
-                      ) : <span className="font-black text-slate-950 text-lg leading-tight break-words">{entry.description}</span>}
+                        <textarea value={entry.description} onChange={e => updateMainEntry(entry.id, 'description', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm font-black outline-none focus:border-sky-500 resize-none" rows={1} placeholder="Enter details..."/>
+                      ) : <span className="text-sm font-black leading-relaxed">{entry.description}</span>}
                     </td>
-                    <td className="px-6 py-5">
+                    <td className="px-6 py-4">
                       {isLaptop ? (
-                        <select value={entry.method} onChange={e => updateMainEntry(entry.id, 'method', e.target.value)} className="w-full bg-slate-100 font-black p-4 text-sm rounded-xl outline-none cursor-pointer">
+                        <select value={entry.method} onChange={e => updateMainEntry(entry.id, 'method', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm font-black outline-none">
                           <option value={PaymentMethod.CASH}>CASH</option>
                           <option value={PaymentMethod.CARD}>CARD</option>
                           <option value={PaymentMethod.PAYPAL}>PAY PAL</option>
                         </select>
-                      ) : <span className="text-[10px] font-black opacity-30 uppercase tracking-widest">{entry.method}</span>}
+                      ) : <span className="text-[10px] font-black opacity-30">{entry.method}</span>}
                     </td>
-                    <td className="px-6 py-5">
+                    <td className="px-6 py-4">
                       {isLaptop ? (
-                        <input type="number" value={entry.cashIn || ''} onChange={e => updateMainEntry(entry.id, 'cashIn', Number(e.target.value))} className="w-full bg-blue-50 text-blue-700 font-black p-4 text-xl rounded-xl outline-none border-2 border-transparent focus:border-blue-500" placeholder="0"/>
-                      ) : <span className="font-black text-blue-600 text-2xl">{formatLKR(entry.cashIn)}</span>}
+                        <input type="number" value={entry.cashIn || ''} onChange={e => updateMainEntry(entry.id, 'cashIn', Number(e.target.value))} className="w-full bg-blue-50/50 text-blue-700 border border-blue-100 rounded-lg p-3 text-lg font-black outline-none focus:border-blue-400" placeholder="0"/>
+                      ) : <span className="text-lg font-black text-blue-600">{formatRs(entry.cashIn)}</span>}
                     </td>
-                    <td className="px-6 py-5">
+                    <td className="px-6 py-4">
                       {isLaptop ? (
-                        <input type="number" value={entry.cashOut || ''} onChange={e => updateMainEntry(entry.id, 'cashOut', Number(e.target.value))} className="w-full bg-red-50 text-red-700 font-black p-4 text-xl rounded-xl outline-none border-2 border-transparent focus:border-red-500" placeholder="0"/>
-                      ) : <span className="font-black text-red-600 text-2xl">{formatLKR(entry.cashOut)}</span>}
+                        <input type="number" value={entry.cashOut || ''} onChange={e => updateMainEntry(entry.id, 'cashOut', Number(e.target.value))} className="w-full bg-red-50/50 text-red-700 border border-red-100 rounded-lg p-3 text-lg font-black outline-none focus:border-red-400" placeholder="0"/>
+                      ) : <span className="text-lg font-black text-red-600">{formatRs(entry.cashOut)}</span>}
                     </td>
                     {isLaptop && (
-                      <td className="px-6 py-5 text-right">
-                        <button onClick={() => deleteEntry(entry.id, 'MAIN')} className="text-red-300 hover:text-red-600 p-2">
-                           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      <td className="px-6 py-4 text-right">
+                        <button onClick={() => deleteEntry(entry.id, false)} className="text-slate-200 hover:text-red-500 transition-colors">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>
                       </td>
                     )}
@@ -410,67 +420,70 @@ const App: React.FC = () => {
             </table>
           </div>
 
-          {/* MAIN FOOTER TOTALS */}
-          <div className="grid grid-cols-2 md:grid-cols-4 p-8 gap-6 bg-slate-900 border-t-4 border-slate-950">
-             <div className="p-6 bg-slate-800 rounded-3xl border border-yellow-500/30 text-center">
-                <p className="text-[10px] font-black text-yellow-500 uppercase mb-2 tracking-widest">Card Total Amt</p>
-                <p className="text-2xl font-black text-white">{formatLKR(totals.mainCardTotal)}</p>
+          {/* Main Summary Bar (Rule 10, 14, 15, 17) */}
+          <div className="grid grid-cols-2 md:grid-cols-4 p-6 gap-6 bg-slate-900 border-t border-slate-950">
+             <div className="bg-slate-800/50 p-5 rounded-2xl border border-yellow-500/20 text-center">
+                <p className="text-[9px] font-black text-yellow-500 uppercase tracking-widest mb-1">Total Card Amt</p>
+                <p className="text-xl font-black text-white">{formatRs(totals.mainCardTotal) || 'Rs 0'}</p>
              </div>
-             <div className="p-6 bg-slate-800 rounded-3xl border border-purple-500/30 text-center">
-                <p className="text-[10px] font-black text-purple-500 uppercase mb-2 tracking-widest">PayPal Total Amt</p>
-                <p className="text-2xl font-black text-white">{formatLKR(totals.mainPaypalTotal)}</p>
+             <div className="bg-slate-800/50 p-5 rounded-2xl border border-purple-500/20 text-center">
+                <p className="text-[9px] font-black text-purple-500 uppercase tracking-widest mb-1">Total PayPal Amt</p>
+                <p className="text-xl font-black text-white">{formatRs(totals.mainPaypalTotal) || 'Rs 0'}</p>
              </div>
-             <div className="p-6 bg-blue-600 rounded-3xl shadow-xl text-center">
-                <p className="text-[10px] font-black text-blue-100 uppercase mb-2 tracking-widest">Cash In Total</p>
-                <p className="text-2xl font-black text-white">{formatLKR(totals.mainCashInTotal)}</p>
+             <div className="bg-blue-600 p-5 rounded-2xl text-center shadow-lg shadow-blue-900/40">
+                <p className="text-[9px] font-black text-blue-100 uppercase tracking-widest mb-1">Cash In Total</p>
+                <p className="text-xl font-black text-white italic">{formatRs(totals.mainCashInTotal) || 'Rs 0'}</p>
              </div>
-             <div className="p-6 bg-red-600 rounded-3xl shadow-xl text-center">
-                <p className="text-[10px] font-black text-red-100 uppercase mb-2 tracking-widest">Cash Out Total</p>
-                <p className="text-2xl font-black text-white">{formatLKR(totals.mainCashOutTotal)}</p>
+             <div className="bg-red-600 p-5 rounded-2xl text-center shadow-lg shadow-red-900/40">
+                <p className="text-[9px] font-black text-red-100 uppercase tracking-widest mb-1">Cash Out Total</p>
+                <p className="text-xl font-black text-white italic">{formatRs(totals.mainCashOutTotal) || 'Rs 0'}</p>
              </div>
           </div>
         </section>
 
-        {/* SUMMARY SECTION */}
-        <section className="bg-slate-950 rounded-[4rem] p-10 md:p-20 flex flex-col md:flex-row justify-between items-center shadow-2xl border-8 border-sky-950 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-sky-500/10 blur-[150px] rounded-full pointer-events-none"></div>
-          
-          <div className="text-center md:text-left z-10">
-            <h3 className="text-sky-400 font-black text-sm uppercase tracking-[0.6em] mb-8">Net Cash Book Balance</h3>
-            <div className="text-7xl md:text-[10rem] font-black text-white tracking-tighter tabular-nums drop-shadow-2xl leading-none">
-              {formatLKR(totals.finalBalance)}
-            </div>
-          </div>
-          
-          {isLaptop && (
-            <button 
-              onClick={handleDayEnd}
-              className="mt-16 md:mt-0 bg-white hover:bg-sky-50 text-slate-950 px-20 py-10 rounded-[3rem] font-black text-3xl shadow-2xl transition-all hover:scale-105 active:scale-95 uppercase"
-            >
-              DAY END CLOSE
-            </button>
-          )}
+        {/* Final Balance (Rule 16, 17) */}
+        <section className="bg-slate-950 rounded-[3rem] p-12 md:p-20 shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between border-8 border-sky-950">
+           <div className="absolute top-0 right-0 w-80 h-80 bg-sky-500/10 blur-[100px] rounded-full"></div>
+           <div className="z-10 text-center md:text-left">
+              <h3 className="text-sky-400 font-black text-xs uppercase tracking-[0.5em] mb-6">Current Cash Balance</h3>
+              <div className="text-7xl md:text-9xl font-black text-white tracking-tighter drop-shadow-2xl tabular-nums italic">
+                {formatRs(totals.finalBalance) || 'Rs 0'}
+              </div>
+           </div>
+           {isLaptop && (
+             <button 
+               onClick={handleDayEnd}
+               className="mt-12 md:mt-0 bg-white hover:bg-sky-50 text-slate-950 px-16 py-8 rounded-3xl font-black text-2xl shadow-2xl transition-all hover:scale-105 active:scale-95 uppercase tracking-tighter italic"
+             >
+               DAY END CLOSE
+             </button>
+           )}
         </section>
+
       </main>
 
-      <div className="fixed bottom-8 left-8 flex gap-4 z-40">
-        <div className="bg-white/95 backdrop-blur-xl px-6 py-4 rounded-3xl shadow-2xl border border-slate-200 flex items-center gap-4">
-           <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse shadow-lg shadow-green-500/50"></div>
-           <span className="text-[11px] font-black uppercase text-slate-500 tracking-widest">Live Link: <span className="text-slate-950">{appState.cabinId}</span></span>
-        </div>
+      {/* Persistence Controls */}
+      <div className="fixed bottom-6 right-6 flex gap-4 z-40">
+        <button 
+          onClick={() => {
+            if (appState.history.length === 0) return alert("Archive is empty.");
+            const hist = appState.history.map(h => `${h.date}: Balance ${formatRs(calculateTotals(h).finalBalance)}`).join('\n');
+            alert(`CASH BOOK ARCHIVE:\n\n${hist}`);
+          }}
+          className="bg-white/90 backdrop-blur-md text-slate-900 px-6 py-4 rounded-2xl font-black text-xs uppercase shadow-2xl border border-slate-200 flex items-center gap-2 hover:bg-white transition-all"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          History ({appState.history.length})
+        </button>
       </div>
 
-      <button 
-        onClick={() => {
-          if (appState.history.length === 0) return alert("Archive is empty.");
-          const summary = appState.history.map(h => `📅 ${h.date}: Balance Rs ${calculateTotals(h).finalBalance.toLocaleString()}`).join('\n');
-          alert(`HISTORY ARCHIVE:\n\n${summary}`);
-        }}
-        className="fixed bottom-8 right-8 bg-slate-950 text-white px-10 py-6 rounded-full font-black text-xs uppercase shadow-2xl z-40 border border-slate-800 hover:bg-slate-900 transition-all flex items-center gap-3"
-      >
-        <svg className="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        Archive ({appState.history.length})
-      </button>
+      {/* Sync Status Badge (Bottom Left) */}
+      <div className="fixed bottom-6 left-6 z-40">
+        <div className="bg-slate-900/95 backdrop-blur-md px-5 py-3 rounded-2xl shadow-2xl border border-slate-800 flex items-center gap-3">
+           <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse"></div>
+           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Live: <span className="text-white">{appState.cabinId}</span></span>
+        </div>
+      </div>
     </div>
   );
 };
