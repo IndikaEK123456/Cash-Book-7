@@ -1,0 +1,7 @@
+{
+  "name": "SHIVAS BEACH CABANAS Cash Book",
+  "description": "A professional real-time cash book application featuring separate Laptop (Editor) and Mobile (Viewer) roles with cloud-simulated sync, multi-currency support (LKR, USD, EURO), and automated day-end reporting.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
