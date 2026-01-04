@@ -24,7 +24,7 @@ const createDefaultDay = (openingBalance: number = 0): DailyData => ({
 const App: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [role, setRole] = useState<DeviceRole>(DeviceRole.MOBILE);
-  const [syncStatus, setSyncStatus] = useState<'offline' | 'online' | 'syncing'>('offline');
+  const [syncStatus, setSyncStatus] = useState<'offline' | 'online' | 'syncing' | 'error'>('offline');
   const [appState, setAppState] = useState<AppState>({
     currentDay: createDefaultDay(),
     history: [],
@@ -36,8 +36,8 @@ const App: React.FC = () => {
   const peerRef = useRef<any>(null);
   const connectionsRef = useRef<any[]>([]);
   const stateRef = useRef(appState);
+  const reconnectTimeoutRef = useRef<number | null>(null);
 
-  // Keep ref in sync for callbacks
   useEffect(() => {
     stateRef.current = appState;
   }, [appState]);
@@ -70,7 +70,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // 2. STABLE LIVE CONNECTION ENGINE (PEERJS)
+  // 2. REFINED SYNC ENGINE (PeerJS with STUN)
   const broadcastState = useCallback((state: AppState) => {
     connectionsRef.current.forEach(conn => {
       if (conn.open) {
@@ -80,49 +80,93 @@ const App: React.FC = () => {
   }, []);
 
   const initializePeer = useCallback((id: string, isMaster: boolean) => {
+    if (peerRef.current) return; // Prevent multiple instances
+
     setSyncStatus('syncing');
-    const peerId = `SHIVAS_BEACH_${id}`;
+    const peerId = `SHIVAS_MASTER_${id.replace(/\s/g, '_')}`;
     
-    // Create Peer Instance
-    const peer = new Peer(isMaster ? peerId : undefined);
+    // MASTER-CLASS P2P CONFIGURATION
+    const peer = new Peer(isMaster ? peerId : undefined, {
+      debug: 1, // Minimize noise, only errors
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+        ]
+      },
+      // Explicitly set for Vercel/HTTPS
+      secure: true,
+      port: 443
+    });
+
     peerRef.current = peer;
 
-    peer.on('open', () => {
-      console.log(`Connection established on ID: ${peerId}`);
+    peer.on('open', (pid: string) => {
+      console.log(`P2P Handshake Ready. Peer ID: ${pid}`);
       setSyncStatus('online');
       
       if (!isMaster) {
-        // Mobile attempts to connect to the Laptop
-        const conn = peer.connect(peerId);
+        // Mobile attempts to connect to the specific Laptop ID
+        const conn = peer.connect(peerId, {
+          reliable: true
+        });
         setupConnection(conn);
       }
     });
 
     peer.on('connection', (conn: any) => {
-      // Laptop receiving connection from Mobile
+      // Laptop side: receiving connection from Mobile
       setupConnection(conn);
-      // Immediately push current state to new device
-      setTimeout(() => conn.send({ type: 'SYNC_STATE', state: stateRef.current }), 500);
+      // Push state immediately upon handshake
+      setTimeout(() => conn.send({ type: 'SYNC_STATE', state: stateRef.current }), 800);
     });
 
     peer.on('error', (err: any) => {
-      console.error("Peer Error:", err);
+      console.error("P2P System Error:", err.type);
+      setSyncStatus('error');
+      
+      // Handle "ID taken" (Laptop already running elsewhere or refresh conflict)
+      if (err.type === 'id-taken' && isMaster) {
+        alert("CRITICAL: Sync ID is already active. Please use a unique Cabin ID or close other tabs.");
+      }
+
+      // Cleanup and try to revive connection after a delay
+      if (reconnectTimeoutRef.current) window.clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        if (peerRef.current) {
+          peerRef.current.destroy();
+          peerRef.current = null;
+          initializePeer(id, isMaster);
+        }
+      }, 5000);
+    });
+
+    peer.on('disconnected', () => {
       setSyncStatus('offline');
+      peer.reconnect();
     });
 
     function setupConnection(conn: any) {
       conn.on('open', () => {
+        console.log("Device-to-Device Linked!");
         connectionsRef.current.push(conn);
         setSyncStatus('online');
       });
 
       conn.on('data', (data: any) => {
         if (data.type === 'SYNC_STATE') {
-          setAppState(prev => ({ ...prev, ...data.state }));
+          // Prevent infinite update loops by checking date stamps or content equality
+          setAppState(prev => {
+             const incoming = JSON.stringify(data.state);
+             const current = JSON.stringify(prev);
+             return incoming !== current ? { ...prev, ...data.state } : prev;
+          });
         }
       });
 
       conn.on('close', () => {
+        console.warn("Remote Connection Closed");
         connectionsRef.current = connectionsRef.current.filter(c => c !== conn);
         if (connectionsRef.current.length === 0) setSyncStatus('offline');
       });
@@ -130,13 +174,12 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (appState.isPaired && !peerRef.current) {
+    if (appState.isPaired) {
       initializePeer(appState.cabinId, role === DeviceRole.LAPTOP);
     }
-    // Auto-save to local storage
+    
     localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
     
-    // If Laptop, broadcast changes to all connected mobile devices
     if (role === DeviceRole.LAPTOP) {
       broadcastState(appState);
     }
@@ -144,12 +187,14 @@ const App: React.FC = () => {
 
   // 3. HANDLERS
   const updateRole = (newRole: DeviceRole) => {
+    if (role === newRole) return;
     setRole(newRole);
     localStorage.setItem('shivas_role', newRole);
-    // Refresh peer connection with new role
+    // Hard refresh P2P on role swap
     if (peerRef.current) {
       peerRef.current.destroy();
       peerRef.current = null;
+      connectionsRef.current = [];
     }
   };
 
@@ -216,7 +261,7 @@ const App: React.FC = () => {
 
   const deleteRecord = (id: string, section: 'OP' | 'MAIN') => {
     if (!isLaptop) return;
-    if (!window.confirm("Delete record?")) return;
+    if (!window.confirm("Permanent Delete?")) return;
     setAppState(prev => {
       const nextDay = { ...prev.currentDay };
       if (section === 'OP') nextDay.outPartyEntries = nextDay.outPartyEntries.filter(e => e.id !== id);
@@ -226,7 +271,7 @@ const App: React.FC = () => {
   };
 
   const handleDayEnd = () => {
-    if (!isLaptop || !window.confirm("Close current day?")) return;
+    if (!isLaptop || !window.confirm("Archive book and start fresh?")) return;
     setAppState(prev => ({
       ...prev,
       history: [prev.currentDay, ...prev.history],
@@ -236,34 +281,32 @@ const App: React.FC = () => {
 
   if (isInitializing) return null;
 
-  // --- LOGIN/PAIRING SCREEN ---
+  // --- PAIRING SCREEN ---
   if (!appState.isPaired) {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-md glass-card p-10 rounded-[3rem] shadow-2xl border border-white/10 text-center space-y-10 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-sky-500 to-transparent"></div>
           <div>
-            <h1 className="text-5xl font-black text-white tracking-tighter italic uppercase mb-2">Shivas</h1>
+            <h1 className="text-5xl font-black text-white tracking-tighter italic uppercase mb-2">SHIVAS</h1>
             <p className="text-sky-500 text-[10px] font-black uppercase tracking-[0.5em]">Stable Live Connection</p>
           </div>
           <div className="space-y-4">
-            <div className="relative group">
-              <input 
-                type="text" 
-                placeholder="CABIN SYNC ID" 
-                className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-6 text-white font-bold text-center focus:ring-4 ring-sky-500/20 outline-none uppercase text-2xl transition-all placeholder:opacity-20"
-                onKeyDown={(e) => e.key === 'Enter' && pairDevice((e.target as HTMLInputElement).value)}
-              />
-            </div>
+            <input 
+              type="text" 
+              placeholder="SYNC ID" 
+              className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-6 text-white font-bold text-center focus:ring-4 ring-sky-500/20 outline-none uppercase text-2xl placeholder:opacity-20"
+              onKeyDown={(e) => e.key === 'Enter' && pairDevice((e.target as HTMLInputElement).value)}
+            />
             <button 
               onClick={() => pairDevice((document.querySelector('input') as HTMLInputElement).value)}
               className="w-full bg-white text-black font-black py-6 rounded-2xl transition-all active:scale-95 text-xl shadow-xl hover:bg-sky-50"
             >
-              ESTABLISH SYNC
+              START SYNC
             </button>
           </div>
-          <p className="text-slate-500 text-[9px] font-bold px-8 leading-relaxed uppercase tracking-wider">
-            Enter the exact same ID on Laptop and Mobile to connect them live over the internet.
+          <p className="text-slate-500 text-[9px] font-bold px-8 leading-relaxed uppercase tracking-widest">
+            Enter the same ID on Laptop and Mobile to connect them across the globe.
           </p>
         </div>
       </div>
@@ -271,8 +314,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-100 flex flex-col font-medium">
-      {/* HEADER */}
+    <div className="min-h-screen bg-[#020617] text-slate-100 flex flex-col font-medium selection:bg-sky-500/20">
       <header className="sticky top-0 z-[100] glass-card border-x-0 border-t-0 py-5 px-6">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex flex-col">
@@ -283,9 +325,9 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${syncStatus === 'online' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${syncStatus === 'online' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : syncStatus === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}`}>
                <span className={`status-dot ${syncStatus === 'online' ? 'status-online' : syncStatus === 'syncing' ? 'status-syncing' : 'status-offline'}`}></span>
-               <span className="text-[10px] font-black uppercase tracking-widest">{syncStatus === 'online' ? 'Live' : 'Offline'}</span>
+               <span className="text-[10px] font-black uppercase tracking-widest">{syncStatus === 'online' ? 'Stable' : syncStatus === 'error' ? 'Retry' : 'Linking...'}</span>
             </div>
             <select 
               value={role} 
@@ -300,8 +342,6 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 md:p-10 space-y-12">
-        
-        {/* OUT PARTY (Master Glow for Editor) */}
         <section className={`glass-card rounded-[2.5rem] overflow-hidden ${isLaptop ? 'master-glow' : ''}`}>
           <div className="px-8 py-6 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
             <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">External Out Party</h2>
@@ -374,7 +414,6 @@ const App: React.FC = () => {
           </div>
         </section>
 
-        {/* MAIN FLOW */}
         <section className={`glass-card rounded-[2.5rem] overflow-hidden ${isLaptop ? 'master-glow' : ''}`}>
           <div className="px-8 py-6 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
             <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">Master Cash Ledger</h2>
@@ -458,7 +497,6 @@ const App: React.FC = () => {
           </div>
         </section>
 
-        {/* NET BALANCE */}
         <section className="relative">
           <div className="absolute -inset-1 bg-gradient-to-r from-sky-500 to-emerald-500 rounded-[4rem] blur opacity-20"></div>
           <div className="relative glass-card bg-slate-900/90 rounded-[4rem] p-12 md:p-24 flex flex-col md:flex-row items-center justify-between gap-12 overflow-hidden">
@@ -481,11 +519,10 @@ const App: React.FC = () => {
         </section>
       </main>
 
-      {/* FOOTER BAR */}
       <footer className="fixed bottom-0 left-0 w-full p-4 flex justify-between items-center pointer-events-none z-[200]">
         <div className="glass-card px-5 py-3 rounded-2xl border border-white/10 pointer-events-auto flex items-center gap-3">
-           <div className={`status-dot ${syncStatus === 'online' ? 'status-online' : 'status-offline'}`}></div>
-           <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sync: <span className="text-white">{appState.cabinId}</span></span>
+           <div className={`status-dot ${syncStatus === 'online' ? 'status-online' : syncStatus === 'syncing' ? 'status-syncing' : 'status-offline'}`}></div>
+           <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sync ID: <span className="text-white">{appState.cabinId}</span></span>
         </div>
         
         <button 
