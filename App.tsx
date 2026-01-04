@@ -5,67 +5,85 @@ import {
   PaymentMethod, 
   AppState, 
   OutPartyEntry, 
-  MainEntry 
+  MainEntry,
+  DailyData
 } from './types';
 import { STORAGE_KEY, DEFAULT_LKR_USD, DEFAULT_LKR_EURO } from './constants';
 import { calculateTotals } from './utils/calculations';
 import { fetchLiveExchangeRates } from './services/geminiService';
 
+const createDefaultDay = (openingBalance: number = 0): DailyData => ({
+  date: new Date().toLocaleDateString('en-GB'),
+  outPartyEntries: [],
+  mainEntries: [],
+  openingBalance
+});
+
 const App: React.FC = () => {
-  // 1. SAFE INITIALIZATION (Prevents Vercel Blank Page)
+  // 1. COMPREHENSIVE INITIALIZATION (Prevents Production Crashes)
   const [role, setRole] = useState<DeviceRole>(() => {
     try {
       const saved = localStorage.getItem('shivas_device_mode');
-      if (saved) return saved as DeviceRole;
+      if (saved === DeviceRole.LAPTOP || saved === DeviceRole.MOBILE) return saved as DeviceRole;
       return window.innerWidth < 1024 ? DeviceRole.MOBILE : DeviceRole.LAPTOP;
     } catch (e) {
-      return DeviceRole.LAPTOP;
+      return DeviceRole.MOBILE;
     }
   });
 
   const [appState, setAppState] = useState<AppState>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Ensure rates exist
-        if (!parsed.rates) parsed.rates = { usd: DEFAULT_LKR_USD, euro: DEFAULT_LKR_EURO };
-        return parsed;
-      }
-    } catch (e) {}
-    
-    return {
-      currentDay: {
-        date: new Date().toLocaleDateString('en-GB'),
-        outPartyEntries: [],
-        mainEntries: [],
-        openingBalance: 0,
-      },
+    const defaultState: AppState = {
+      currentDay: createDefaultDay(),
       history: [],
       cabinId: '',
       rates: { usd: DEFAULT_LKR_USD, euro: DEFAULT_LKR_EURO },
       isPaired: false
     };
+
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return defaultState;
+      
+      const parsed = JSON.parse(saved);
+      if (!parsed || typeof parsed !== 'object') return defaultState;
+
+      // Deep Merge / Sanitization to ensure arrays exist
+      return {
+        ...defaultState,
+        ...parsed,
+        currentDay: {
+          ...defaultState.currentDay,
+          ...(parsed.currentDay || {}),
+          outPartyEntries: parsed.currentDay?.outPartyEntries || [],
+          mainEntries: parsed.currentDay?.mainEntries || []
+        },
+        history: Array.isArray(parsed.history) ? parsed.history : [],
+        rates: parsed.rates || defaultState.rates
+      };
+    } catch (e) {
+      console.error("State recovery failed:", e);
+      return defaultState;
+    }
   });
 
-  // 2. RECONNECT & SYNC LOGIC (Rule 3, 4)
+  // 2. REAL-TIME CLOUD SYNC SIMULATION
   useEffect(() => {
-    // Cross-tab sync via storage event
     const handleSync = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY && e.newValue) {
-        const newState = JSON.parse(e.newValue);
-        if (newState.cabinId === appState.cabinId) {
-          setAppState(newState);
-        }
+        try {
+          const newState = JSON.parse(e.newValue);
+          if (newState.cabinId === appState.cabinId) {
+            setAppState(prev => ({ ...prev, ...newState }));
+          }
+        } catch (err) {}
       }
     };
     window.addEventListener('storage', handleSync);
 
-    // Cross-device "Cloud" Relay emulation via BroadcastChannel
     const channel = new BroadcastChannel('shivas_cloud_relay');
     channel.onmessage = (e) => {
-      if (e.data.cabinId === appState.cabinId && e.data.state) {
-        setAppState(e.data.state);
+      if (e.data?.cabinId === appState.cabinId && e.data?.state) {
+        setAppState(prev => ({ ...prev, ...e.data.state }));
       }
     };
 
@@ -75,7 +93,6 @@ const App: React.FC = () => {
     };
   }, [appState.cabinId]);
 
-  // Persist and broadcast
   useEffect(() => {
     if (appState.isPaired) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
@@ -84,24 +101,20 @@ const App: React.FC = () => {
     }
   }, [appState]);
 
-  // Fetch Live Rates (Rule 12)
+  // Exchange Rates (Rule 12)
   useEffect(() => {
-    const updateRates = async () => {
-      const rates = await fetchLiveExchangeRates();
+    fetchLiveExchangeRates().then(rates => {
       setAppState(prev => ({ ...prev, rates }));
-    };
-    updateRates();
-    const interval = setInterval(updateRates, 1000 * 60 * 30); // 30 min refresh
-    return () => clearInterval(interval);
+    });
   }, []);
 
-  // 3. LOGIC & PERMISSIONS (Rule 2)
+  // 3. LOGIC & PERMISSIONS
   const isLaptop = role === DeviceRole.LAPTOP;
   const totals = useMemo(() => calculateTotals(appState.currentDay), [appState.currentDay]);
 
   const pairDevice = (id: string) => {
     const cleanId = id.trim().toUpperCase();
-    if (!cleanId) return;
+    if (!cleanId) return alert("Please enter a valid ID");
     setAppState(prev => ({ ...prev, cabinId: cleanId, isPaired: true }));
   };
 
@@ -165,7 +178,7 @@ const App: React.FC = () => {
 
   const deleteEntry = (id: string, section: 'OP' | 'MAIN') => {
     if (!isLaptop) return;
-    if (!window.confirm("Are you sure you want to delete this entry?")) return;
+    if (!window.confirm("Delete this entry?")) return;
     setAppState(prev => ({
       ...prev,
       currentDay: {
@@ -178,54 +191,50 @@ const App: React.FC = () => {
 
   const handleDayEnd = () => {
     if (!isLaptop) return;
-    if (!window.confirm("Perform Day End? Today's data will be saved to archive and cleared for a new day.")) return;
+    if (!window.confirm("Perform Day End? Today's data will be saved and cleared.")) return;
     setAppState(prev => ({
       ...prev,
       history: [...prev.history, prev.currentDay],
-      currentDay: {
-        date: new Date().toLocaleDateString('en-GB'),
-        outPartyEntries: [],
-        mainEntries: [],
-        openingBalance: totals.finalBalance
-      }
+      currentDay: createDefaultDay(totals.finalBalance)
     }));
   };
 
-  // 5. RENDER HELPERS
   const formatLKR = (val: number) => {
-    if (val === 0) return '';
+    if (!val || val === 0) return 'Rs 0';
     return `Rs ${val.toLocaleString()}`;
   };
 
-  // --- PAIRING SCREEN (Rule 3) ---
+  // --- PAIRING SCREEN ---
   if (!appState.isPaired) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-        <div className="bg-slate-900 border border-slate-800 p-10 rounded-[3rem] shadow-2xl max-w-sm w-full text-center">
+        <div className="bg-slate-900 border border-slate-800 p-8 md:p-12 rounded-[2.5rem] shadow-2xl max-w-md w-full text-center">
           <h1 className="text-4xl font-black text-sky-400 mb-2 tracking-tighter">SHIVAS BEACH</h1>
-          <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mb-10">Advanced Cloud Cash Book</p>
+          <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mb-12">Universal Cloud Cash Book</p>
           <input 
             type="text" 
             placeholder="ENTER CABIN ID" 
-            className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-6 py-5 text-white font-black text-center mb-6 focus:border-sky-500 outline-none uppercase text-xl"
+            className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-6 py-5 text-white font-black text-center mb-6 focus:border-sky-500 outline-none uppercase text-xl placeholder:text-slate-600"
             onKeyDown={(e) => e.key === 'Enter' && pairDevice((e.target as HTMLInputElement).value)}
           />
           <button 
-            onClick={() => pairDevice((document.querySelector('input') as HTMLInputElement).value)}
-            className="w-full bg-sky-500 hover:bg-sky-400 text-slate-950 font-black py-5 rounded-2xl transition-all shadow-lg active:scale-95"
+            onClick={() => {
+              const val = (document.querySelector('input') as HTMLInputElement).value;
+              pairDevice(val);
+            }}
+            className="w-full bg-sky-500 hover:bg-sky-400 text-slate-950 font-black py-5 rounded-2xl transition-all shadow-lg active:scale-95 text-lg"
           >
-            CONNECT DEVICES
+            PAIR & CONNECT
           </button>
         </div>
       </div>
     );
   }
 
-  // --- MAIN DASHBOARD (Rule 20) ---
+  // --- MAIN DASHBOARD ---
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950 font-bold selection:bg-sky-200">
-      {/* HEADER (Rule 9, 12) */}
-      <header className="bg-slate-950 text-white p-5 sticky top-0 z-50 shadow-2xl border-b border-white/5">
+    <div className="min-h-screen bg-slate-100 text-slate-950 font-bold">
+      <header className="bg-slate-950 text-white p-5 sticky top-0 z-50 shadow-2xl">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="text-center md:text-left">
             <h1 className="text-2xl md:text-3xl font-black tracking-tighter text-sky-400">SHIVAS BEACH CABANAS</h1>
@@ -237,13 +246,13 @@ const App: React.FC = () => {
           </div>
           <div className="flex items-center gap-3">
             <div className="bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-xl text-xs font-black border border-emerald-500/30 flex items-center gap-2">
-              <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
+              <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-sm shadow-emerald-500"></span>
               ID: {appState.cabinId}
             </div>
             <select 
               value={role} 
               onChange={(e) => switchMode(e.target.value as DeviceRole)}
-              className="bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-black uppercase outline-none focus:ring-2 ring-sky-500"
+              className="bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-black uppercase outline-none focus:ring-2 ring-sky-500 cursor-pointer"
             >
               <option value={DeviceRole.LAPTOP}>💻 LAPTOP (EDITOR)</option>
               <option value={DeviceRole.MOBILE}>📱 MOBILE (VIEWER)</option>
@@ -254,12 +263,12 @@ const App: React.FC = () => {
 
       <main className="max-w-7xl mx-auto p-4 md:p-8 space-y-12">
         
-        {/* SECTION 1: OUT PARTY (Rule 5, 6, 8) */}
+        {/* OUT PARTY SECTION */}
         <section className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
           <div className="bg-slate-50 px-8 py-5 flex justify-between items-center border-b border-slate-200">
             <h2 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em]">Out Party Section</h2>
             {isLaptop && (
-              <button onClick={addOutParty} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-2xl text-xs font-black shadow-lg transition-all">+ NEW PARTY</button>
+              <button onClick={addOutParty} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-2xl text-xs font-black shadow-lg transition-all">+ ADD ENTRY</button>
             )}
           </div>
           <div className="overflow-x-auto">
@@ -269,12 +278,12 @@ const App: React.FC = () => {
                   <th className="px-8 py-4 w-20">#</th>
                   <th className="px-8 py-4">Method</th>
                   <th className="px-8 py-4">Amount (Rs)</th>
-                  {isLaptop && <th className="px-8 py-4 text-right">Action</th>}
+                  {isLaptop && <th className="px-8 py-4 text-right">Delete</th>}
                 </tr>
               </thead>
               <tbody>
                 {appState.currentDay.outPartyEntries.map((entry, i) => (
-                  <tr key={entry.id} className="border-b last:border-0 hover:bg-slate-50/50 transition-colors">
+                  <tr key={entry.id} className="border-b last:border-0 hover:bg-slate-50/50">
                     <td className="px-8 py-5 font-black text-slate-950 text-xl">{i + 1}</td>
                     <td className="px-8 py-5">
                       {isLaptop ? (
@@ -303,12 +312,12 @@ const App: React.FC = () => {
                           className="bg-slate-100 font-black rounded-xl px-5 py-3 w-full outline-none border-2 border-transparent focus:border-sky-500 text-slate-950 text-lg"
                         />
                       ) : (
-                        <span className="font-black text-slate-950 text-2xl tracking-tighter">{formatLKR(entry.amount)}</span>
+                        <span className="font-black text-slate-950 text-2xl">{formatLKR(entry.amount)}</span>
                       )}
                     </td>
                     {isLaptop && (
                       <td className="px-8 py-5 text-right">
-                        <button onClick={() => deleteEntry(entry.id, 'OP')} className="text-red-400 hover:text-red-600 p-2 bg-red-50 rounded-lg">
+                        <button onClick={() => deleteEntry(entry.id, 'OP')} className="text-red-400 hover:text-red-600 p-2 bg-red-50 rounded-lg transition-colors">
                           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                       </td>
@@ -319,24 +328,24 @@ const App: React.FC = () => {
             </table>
           </div>
           
-          {/* OUT PARTY TOTALS (Rule 7, 13, 17) */}
-          <div className="grid grid-cols-1 md:grid-cols-3 bg-slate-950 text-white border-t-4 border-slate-900">
-             <div className="p-8 border-r border-white/5 text-center bg-blue-600/5">
-                <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-2">Out Party Cash Total</p>
-                <p className="text-4xl font-black text-blue-500 tracking-tighter">{formatLKR(totals.opCash)}</p>
+          {/* OUT PARTY FOOTER */}
+          <div className="grid grid-cols-1 md:grid-cols-3 bg-slate-950 text-white">
+             <div className="p-8 border-r border-white/5 text-center">
+                <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">OP Cash Total</p>
+                <p className="text-3xl font-black">{formatLKR(totals.opCash)}</p>
              </div>
              <div className="p-8 border-r border-white/5 text-center bg-yellow-400/5">
-                <p className="text-[10px] font-black text-yellow-400 uppercase tracking-[0.2em] mb-2">Out Party Card Total</p>
-                <p className="text-4xl font-black text-yellow-500 tracking-tighter">{formatLKR(totals.opCard)}</p>
+                <p className="text-[10px] font-black text-yellow-400 uppercase tracking-widest mb-1">OP Card Total</p>
+                <p className="text-3xl font-black text-yellow-500">{formatLKR(totals.opCard)}</p>
              </div>
              <div className="p-8 text-center bg-purple-400/5">
-                <p className="text-[10px] font-black text-purple-400 uppercase tracking-[0.2em] mb-2">Out Party PayPal Total</p>
-                <p className="text-4xl font-black text-purple-500 tracking-tighter">{formatLKR(totals.opPaypal)}</p>
+                <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">OP PayPal Total</p>
+                <p className="text-3xl font-black text-purple-500">{formatLKR(totals.opPaypal)}</p>
              </div>
           </div>
         </section>
 
-        {/* SECTION 2: MAIN SECTION (Rule 10) */}
+        {/* MAIN SECTION */}
         <section className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
           <div className="bg-slate-50 px-8 py-5 flex justify-between items-center border-b border-slate-200">
             <h2 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em]">Main Cash Flow</h2>
@@ -358,7 +367,7 @@ const App: React.FC = () => {
               </thead>
               <tbody>
                 {appState.currentDay.mainEntries.map(entry => (
-                  <tr key={entry.id} className="border-b last:border-0 hover:bg-slate-50/50 transition-colors">
+                  <tr key={entry.id} className="border-b last:border-0 hover:bg-slate-50/50">
                     <td className="px-6 py-5">
                       {isLaptop ? (
                         <input value={entry.roomNo} onChange={e => updateMainEntry(entry.id, 'roomNo', e.target.value)} className="w-full bg-slate-100 font-black p-4 text-sm rounded-xl outline-none focus:ring-2 ring-sky-500" placeholder="RM#"/>
@@ -371,7 +380,7 @@ const App: React.FC = () => {
                     </td>
                     <td className="px-6 py-5">
                       {isLaptop ? (
-                        <select value={entry.method} onChange={e => updateMainEntry(entry.id, 'method', e.target.value)} className="w-full bg-slate-100 font-black p-4 text-sm rounded-xl outline-none">
+                        <select value={entry.method} onChange={e => updateMainEntry(entry.id, 'method', e.target.value)} className="w-full bg-slate-100 font-black p-4 text-sm rounded-xl outline-none cursor-pointer">
                           <option value={PaymentMethod.CASH}>CASH</option>
                           <option value={PaymentMethod.CARD}>CARD</option>
                           <option value={PaymentMethod.PAYPAL}>PAY PAL</option>
@@ -381,16 +390,16 @@ const App: React.FC = () => {
                     <td className="px-6 py-5">
                       {isLaptop ? (
                         <input type="number" value={entry.cashIn || ''} onChange={e => updateMainEntry(entry.id, 'cashIn', Number(e.target.value))} className="w-full bg-blue-50 text-blue-700 font-black p-4 text-xl rounded-xl outline-none border-2 border-transparent focus:border-blue-500" placeholder="0"/>
-                      ) : <span className="font-black text-blue-600 text-2xl tracking-tighter">{formatLKR(entry.cashIn)}</span>}
+                      ) : <span className="font-black text-blue-600 text-2xl">{formatLKR(entry.cashIn)}</span>}
                     </td>
                     <td className="px-6 py-5">
                       {isLaptop ? (
                         <input type="number" value={entry.cashOut || ''} onChange={e => updateMainEntry(entry.id, 'cashOut', Number(e.target.value))} className="w-full bg-red-50 text-red-700 font-black p-4 text-xl rounded-xl outline-none border-2 border-transparent focus:border-red-500" placeholder="0"/>
-                      ) : <span className="font-black text-red-600 text-2xl tracking-tighter">{formatLKR(entry.cashOut)}</span>}
+                      ) : <span className="font-black text-red-600 text-2xl">{formatLKR(entry.cashOut)}</span>}
                     </td>
                     {isLaptop && (
                       <td className="px-6 py-5 text-right">
-                        <button onClick={() => deleteEntry(entry.id, 'MAIN')} className="text-red-300 hover:text-red-600">
+                        <button onClick={() => deleteEntry(entry.id, 'MAIN')} className="text-red-300 hover:text-red-600 p-2">
                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>
                       </td>
@@ -401,7 +410,7 @@ const App: React.FC = () => {
             </table>
           </div>
 
-          {/* MAIN SECTION TOTALS (Rule 10, 14, 15, 17) */}
+          {/* MAIN FOOTER TOTALS */}
           <div className="grid grid-cols-2 md:grid-cols-4 p-8 gap-6 bg-slate-900 border-t-4 border-slate-950">
              <div className="p-6 bg-slate-800 rounded-3xl border border-yellow-500/30 text-center">
                 <p className="text-[10px] font-black text-yellow-500 uppercase mb-2 tracking-widest">Card Total Amt</p>
@@ -422,22 +431,21 @@ const App: React.FC = () => {
           </div>
         </section>
 
-        {/* FINAL SUMMARY (Rule 16, 17) */}
-        <section className="bg-slate-950 rounded-[4rem] p-10 md:p-20 flex flex-col md:flex-row justify-between items-center shadow-2xl relative overflow-hidden border-8 border-sky-950">
-          <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-sky-500/10 blur-[150px] rounded-full pointer-events-none"></div>
-          <div className="absolute -bottom-20 -left-20 w-[400px] h-[400px] bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none"></div>
+        {/* SUMMARY SECTION */}
+        <section className="bg-slate-950 rounded-[4rem] p-10 md:p-20 flex flex-col md:flex-row justify-between items-center shadow-2xl border-8 border-sky-950 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-sky-500/10 blur-[150px] rounded-full pointer-events-none"></div>
           
           <div className="text-center md:text-left z-10">
             <h3 className="text-sky-400 font-black text-sm uppercase tracking-[0.6em] mb-8">Net Cash Book Balance</h3>
             <div className="text-7xl md:text-[10rem] font-black text-white tracking-tighter tabular-nums drop-shadow-2xl leading-none">
-              {formatLKR(totals.finalBalance) || 'Rs 0'}
+              {formatLKR(totals.finalBalance)}
             </div>
           </div>
           
           {isLaptop && (
             <button 
               onClick={handleDayEnd}
-              className="mt-16 md:mt-0 bg-white hover:bg-sky-50 text-slate-950 px-20 py-10 rounded-[3rem] font-black text-3xl shadow-2xl transition-all hover:scale-105 active:scale-95 uppercase tracking-tighter"
+              className="mt-16 md:mt-0 bg-white hover:bg-sky-50 text-slate-950 px-20 py-10 rounded-[3rem] font-black text-3xl shadow-2xl transition-all hover:scale-105 active:scale-95 uppercase"
             >
               DAY END CLOSE
             </button>
@@ -445,25 +453,23 @@ const App: React.FC = () => {
         </section>
       </main>
 
-      {/* SYNC STATUS OVERLAY */}
       <div className="fixed bottom-8 left-8 flex gap-4 z-40">
-        <div className="bg-white/90 backdrop-blur-xl px-6 py-4 rounded-3xl shadow-2xl border border-slate-200 flex items-center gap-4">
+        <div className="bg-white/95 backdrop-blur-xl px-6 py-4 rounded-3xl shadow-2xl border border-slate-200 flex items-center gap-4">
            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse shadow-lg shadow-green-500/50"></div>
            <span className="text-[11px] font-black uppercase text-slate-500 tracking-widest">Live Link: <span className="text-slate-950">{appState.cabinId}</span></span>
         </div>
       </div>
 
-      {/* HISTORY BUTTON (Rule 21) */}
       <button 
         onClick={() => {
-          if (appState.history.length === 0) return alert("Archive is empty. Perform 'Day End' to save data.");
+          if (appState.history.length === 0) return alert("Archive is empty.");
           const summary = appState.history.map(h => `📅 ${h.date}: Balance Rs ${calculateTotals(h).finalBalance.toLocaleString()}`).join('\n');
-          alert(`SHIVAS BEACH ARCHIVE:\n\n${summary}`);
+          alert(`HISTORY ARCHIVE:\n\n${summary}`);
         }}
-        className="fixed bottom-8 right-8 bg-slate-950 text-white px-10 py-6 rounded-full font-black text-xs uppercase shadow-2xl z-40 border border-slate-800 hover:bg-slate-900 transition-all flex items-center gap-3 active:scale-95"
+        className="fixed bottom-8 right-8 bg-slate-950 text-white px-10 py-6 rounded-full font-black text-xs uppercase shadow-2xl z-40 border border-slate-800 hover:bg-slate-900 transition-all flex items-center gap-3"
       >
         <svg className="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        Archive History ({appState.history.length})
+        Archive ({appState.history.length})
       </button>
     </div>
   );
