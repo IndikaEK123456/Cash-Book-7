@@ -267,11 +267,15 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen flex flex-col bg-[#020617] text-slate-100 font-medium overflow-hidden">
-      {/* HEADER: COMPACT WITH DUAL CURRENCY */}
+      {/* HEADER: COMPACT WITH DUAL CURRENCY AND DATE */}
       <header className="glass-card border-x-0 border-t-0 py-2 px-4 flex-shrink-0 z-50">
         <div className="max-w-full mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <h1 className="text-sm md:text-base font-[900] tracking-tighter italic uppercase text-white whitespace-nowrap">SHIVAS BEACH</h1>
+            <div className="flex flex-col">
+              <h1 className="text-sm md:text-base font-[900] tracking-tighter italic uppercase text-white whitespace-nowrap leading-none">SHIVAS BEACH</h1>
+              <span className="text-[8px] font-black text-sky-400 mt-1 uppercase tracking-widest">{appState.currentDay.date}</span>
+            </div>
+            <div className="h-6 w-px bg-white/10 mx-1 hidden sm:block"></div>
             <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
               <span className="flex items-center gap-1.5 bg-sky-500/10 px-2 py-0.5 rounded-md text-[9px] font-black text-sky-400 border border-sky-500/20 whitespace-nowrap">
                 <span className="opacity-50">$</span> {appState.rates.usd}
@@ -283,7 +287,7 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-2">
-             <div className="hidden sm:flex items-center gap-2 px-2 py-1 bg-white/5 rounded-md border border-white/5">
+             <div className="hidden lg:flex items-center gap-2 px-2 py-1 bg-white/5 rounded-md border border-white/5">
                <span className={`status-dot ${syncStatus === 'online' ? 'status-online' : 'status-syncing'}`}></span>
                <span className="text-[9px] font-black uppercase text-slate-500">{appState.cabinId}</span>
              </div>
