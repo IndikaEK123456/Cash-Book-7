@@ -15,6 +15,8 @@
             background-color: #020617;
             color: #f8fafc;
             -webkit-tap-highlight-color: transparent;
+            height: 100vh;
+            overflow: hidden;
         }
         .glass-card {
             background: rgba(30, 41, 59, 0.4);
@@ -22,7 +24,7 @@
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
         .master-glow {
-            box-shadow: 0 0 40px -10px rgba(14, 165, 233, 0.15);
+            box-shadow: 0 0 30px -5px rgba(14, 165, 233, 0.1);
         }
         input::-webkit-outer-spin-button,
         input::-webkit-inner-spin-button {
@@ -40,15 +42,14 @@
         .status-syncing { background-color: #f59e0b; animation: pulse 1s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
 
-        /* Compact Scrollbars */
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        /* Ultra Compact Scrollbars */
+        ::-webkit-scrollbar { width: 3px; height: 3px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
-
-        /* Sticky Table Optimization */
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
+        
+        /* High Density Table Styling */
         .table-container {
-            max-height: 45vh;
+            flex: 1;
             overflow-y: auto;
             position: relative;
         }
@@ -56,7 +57,22 @@
             position: sticky;
             top: 0;
             background: #0f172a;
-            z-index: 10;
+            z-index: 20;
+            box-shadow: 0 1px 0 rgba(255,255,255,0.05);
+        }
+        
+        /* Tight Input Fields */
+        .compact-input {
+            background: transparent;
+            border: none;
+            outline: none;
+            width: 100%;
+            padding: 2px 4px;
+            font-size: 11px;
+            color: #fff;
+        }
+        .compact-input:focus {
+            background: rgba(14, 165, 233, 0.1);
         }
     </style>
     <script type="importmap">
@@ -66,13 +82,13 @@
     "react-dom": "https://esm.sh/react-dom@19.0.0",
     "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
     "@google/genai": "https://esm.sh/@google/genai@1.3.0",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
   }
 }
 </script>
 </head>
-<body class="antialiased overflow-x-hidden selection:bg-sky-500/30">
+<body class="antialiased selection:bg-sky-500/30">
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
 </body>

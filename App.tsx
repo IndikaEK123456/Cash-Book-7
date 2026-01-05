@@ -38,6 +38,7 @@ const App: React.FC = () => {
   const stateRef = useRef(appState);
   const reconnectTimeoutRef = useRef<number | null>(null);
 
+  // Connectivity context tracking
   useEffect(() => {
     stateRef.current = appState;
   }, [appState]);
@@ -70,7 +71,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // 2. STABLE P2P SYNC ENGINE (KEEP UNCHANGED)
+  // 2. STABLE P2P SYNC ENGINE (REMAINING UNTOUCHED AS REQUESTED)
   const broadcastState = useCallback((state: AppState) => {
     connectionsRef.current.forEach(conn => {
       if (conn.open) {
@@ -224,7 +225,7 @@ const App: React.FC = () => {
 
   const deleteRecord = (id: string, section: 'OP' | 'MAIN') => {
     if (!isLaptop) return;
-    if (!window.confirm("Delete?")) return;
+    if (!window.confirm("Delete record?")) return;
     setAppState(prev => {
       const nextDay = { ...prev.currentDay };
       if (section === 'OP') nextDay.outPartyEntries = nextDay.outPartyEntries.filter(e => e.id !== id);
@@ -248,13 +249,13 @@ const App: React.FC = () => {
   if (!appState.isPaired) {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center p-6">
-        <div className="w-full max-w-md glass-card p-8 rounded-[2rem] text-center space-y-8">
+        <div className="w-full max-w-md glass-card p-8 rounded-[2rem] text-center space-y-8 shadow-2xl">
           <h1 className="text-4xl font-black text-white italic uppercase tracking-tighter">SHIVAS</h1>
           <div className="space-y-4">
             <input 
               type="text" 
               placeholder="SYNC ID" 
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-white font-bold text-center outline-none uppercase text-xl"
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-white font-bold text-center outline-none uppercase text-xl focus:ring-2 ring-sky-500/50"
               onKeyDown={(e) => e.key === 'Enter' && pairDevice((e.target as HTMLInputElement).value)}
             />
             <button onClick={() => pairDevice((document.querySelector('input') as HTMLInputElement).value)} className="w-full bg-white text-black font-black py-4 rounded-xl transition-all active:scale-95 text-lg">START SYNC</button>
@@ -265,77 +266,79 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-100 flex flex-col font-medium h-screen overflow-hidden">
-      {/* COMPACT HEADER */}
-      <header className="glass-card border-x-0 border-t-0 py-3 px-4 flex-shrink-0">
-        <div className="max-w-[1600px] mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-lg font-black tracking-tighter italic uppercase text-white">SHIVAS BEACH</h1>
-            <div className="hidden sm:flex gap-2">
-              <span className="bg-sky-500/10 px-3 py-1 rounded-lg text-[10px] font-bold text-sky-400 border border-sky-500/20">USD: {appState.rates.usd}</span>
-              <span className="bg-emerald-500/10 px-3 py-1 rounded-lg text-[10px] font-bold text-emerald-400 border border-emerald-500/20">EURO: {appState.rates.euro}</span>
+    <div className="h-screen flex flex-col bg-[#020617] text-slate-100 font-medium overflow-hidden">
+      {/* HEADER: COMPACT WITH DUAL CURRENCY */}
+      <header className="glass-card border-x-0 border-t-0 py-2 px-4 flex-shrink-0 z-50">
+        <div className="max-w-full mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h1 className="text-sm md:text-base font-[900] tracking-tighter italic uppercase text-white whitespace-nowrap">SHIVAS BEACH</h1>
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+              <span className="flex items-center gap-1.5 bg-sky-500/10 px-2 py-0.5 rounded-md text-[9px] font-black text-sky-400 border border-sky-500/20 whitespace-nowrap">
+                <span className="opacity-50">$</span> {appState.rates.usd}
+              </span>
+              <span className="flex items-center gap-1.5 bg-emerald-500/10 px-2 py-0.5 rounded-md text-[9px] font-black text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+                <span className="opacity-50">€</span> {appState.rates.euro}
+              </span>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-             <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-lg border border-white/10">
+          
+          <div className="flex items-center gap-2">
+             <div className="hidden sm:flex items-center gap-2 px-2 py-1 bg-white/5 rounded-md border border-white/5">
                <span className={`status-dot ${syncStatus === 'online' ? 'status-online' : 'status-syncing'}`}></span>
-               <span className="text-[10px] font-black uppercase text-slate-400">{appState.cabinId}</span>
+               <span className="text-[9px] font-black uppercase text-slate-500">{appState.cabinId}</span>
              </div>
-            <select value={role} onChange={(e) => updateRole(e.target.value as DeviceRole)} className="bg-white/5 text-[10px] font-black uppercase py-1 px-2 rounded border border-white/10 outline-none">
-              <option value={DeviceRole.LAPTOP} className="bg-slate-900">LAPTOP</option>
-              <option value={DeviceRole.MOBILE} className="bg-slate-900">MOBILE</option>
+            <select value={role} onChange={(e) => updateRole(e.target.value as DeviceRole)} className="bg-white/5 text-[9px] font-black uppercase py-1 px-2 rounded border border-white/10 outline-none cursor-pointer">
+              <option value={DeviceRole.LAPTOP} className="bg-slate-900">💻 LAPTOP</option>
+              <option value={DeviceRole.MOBILE} className="bg-slate-900">📱 MOBILE</option>
             </select>
           </div>
         </div>
-        {/* Mobile-only currency row */}
-        <div className="flex sm:hidden gap-2 mt-2 justify-center">
-            <span className="bg-sky-500/10 px-2 py-0.5 rounded text-[9px] font-black text-sky-400">USD {appState.rates.usd}</span>
-            <span className="bg-emerald-500/10 px-2 py-0.5 rounded text-[9px] font-black text-emerald-400">EUR {appState.rates.euro}</span>
-        </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto p-2 md:p-4 space-y-4 max-w-[1600px] mx-auto w-full">
+      {/* MAIN VIEWPORT: TWO HIGH-DENSITY TABLES */}
+      <main className="flex-1 flex flex-col md:flex-row p-1 gap-1 overflow-hidden">
         
-        {/* OUT PARTY - HIGH DENSITY */}
-        <section className={`glass-card rounded-2xl overflow-hidden flex flex-col ${isLaptop ? 'master-glow' : ''}`}>
-          <div className="px-4 py-2 bg-white/5 border-b border-white/5 flex justify-between items-center">
-            <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Out Party Terminal</h2>
-            <div className="flex gap-4">
-              <span className="text-[9px] font-bold text-sky-400">CASH: {totals.opCash.toLocaleString()}</span>
-              <span className="text-[9px] font-bold text-yellow-500">CARD: {totals.opCard.toLocaleString()}</span>
+        {/* OUT PARTY: LEFT SIDE ON DESKTOP */}
+        <section className={`flex-[2] glass-card rounded-lg overflow-hidden flex flex-col ${isLaptop ? 'master-glow' : ''}`}>
+          <div className="px-3 py-1.5 bg-white/5 border-b border-white/5 flex justify-between items-center flex-shrink-0">
+            <h2 className="text-[9px] font-black text-slate-500 uppercase tracking-widest">OUT PARTY</h2>
+            <div className="flex gap-3">
+               <span className="text-[9px] font-bold text-sky-400">CSH: {totals.opCash.toLocaleString()}</span>
+               <span className="text-[9px] font-bold text-yellow-500">CRD: {totals.opCard.toLocaleString()}</span>
             </div>
           </div>
+          
           <div className="table-container">
-            <table className="w-full text-left text-[11px]">
+            <table className="w-full text-left text-[11px] border-collapse">
               <thead>
-                <tr className="bg-slate-900/50">
-                  <th className="px-4 py-2 w-10 text-slate-500">#</th>
-                  <th className="px-4 py-2 w-32">Method</th>
-                  <th className="px-4 py-2">Amount (LKR)</th>
-                  {isLaptop && <th className="px-4 py-2 w-10"></th>}
+                <tr>
+                  <th className="px-2 py-1.5 w-8 text-slate-500">#</th>
+                  <th className="px-2 py-1.5 w-20">Type</th>
+                  <th className="px-2 py-1.5">Amount (LKR)</th>
+                  {isLaptop && <th className="px-2 py-1.5 w-8"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {appState.currentDay.outPartyEntries.map((e, i) => (
-                  <tr key={e.id} className="hover:bg-white/[0.02]">
-                    <td className="px-4 py-1 text-slate-600 font-bold">{i + 1}</td>
-                    <td className="px-4 py-1">
+                  <tr key={e.id} className="hover:bg-white/[0.03] group">
+                    <td className="px-2 py-0.5 text-slate-600 font-bold">{i + 1}</td>
+                    <td className="px-2 py-0.5">
                       {isLaptop ? (
-                        <select value={e.method} onChange={(ev) => updateOutParty(e.id, 'method', ev.target.value as PaymentMethod)} className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
-                          <option value={PaymentMethod.CASH} className="bg-slate-900">CASH</option>
-                          <option value={PaymentMethod.CARD} className="bg-slate-900">CARD</option>
-                          <option value={PaymentMethod.PAYPAL} className="bg-slate-900">PAYPAL</option>
+                        <select value={e.method} onChange={(ev) => updateOutParty(e.id, 'method', ev.target.value as PaymentMethod)} className="bg-transparent border-none text-[10px] font-bold text-sky-400 p-0 outline-none">
+                          <option value={PaymentMethod.CASH} className="bg-slate-900 text-white">CASH</option>
+                          <option value={PaymentMethod.CARD} className="bg-slate-900 text-white">CARD</option>
+                          <option value={PaymentMethod.PAYPAL} className="bg-slate-900 text-white">PAYPAL</option>
                         </select>
-                      ) : <span className="text-[9px] opacity-40 uppercase">{e.method}</span>}
+                      ) : <span className="text-[9px] font-black opacity-30 uppercase">{e.method}</span>}
                     </td>
-                    <td className="px-4 py-1">
+                    <td className="px-2 py-0.5">
                       {isLaptop ? (
-                        <input type="number" value={e.amount || ''} onChange={(ev) => updateOutParty(e.id, 'amount', Number(ev.target.value))} className="w-full bg-transparent font-black text-white outline-none focus:text-sky-400" />
-                      ) : <span className="font-black">Rs {e.amount.toLocaleString()}</span>}
+                        <input type="number" value={e.amount || ''} onChange={(ev) => updateOutParty(e.id, 'amount', Number(ev.target.value))} className="compact-input font-black" placeholder="0" />
+                      ) : <span className="font-black text-white">{e.amount.toLocaleString()}</span>}
                     </td>
                     {isLaptop && (
-                      <td className="px-4 py-1">
-                        <button onClick={() => deleteRecord(e.id, 'OP')} className="text-white/10 hover:text-red-500 transition-colors"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                      <td className="px-2 py-0.5 text-center">
+                        <button onClick={() => deleteRecord(e.id, 'OP')} className="text-white/10 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg></button>
                       </td>
                     )}
                   </tr>
@@ -343,69 +346,65 @@ const App: React.FC = () => {
               </tbody>
             </table>
           </div>
-          {isLaptop && (
-            <div className="p-2 border-t border-white/5 bg-slate-900/40">
-              <button onClick={addOutParty} className="w-full bg-sky-500/20 hover:bg-sky-500/30 text-sky-400 text-[10px] font-black py-2 rounded-lg transition-all border border-sky-500/20">+ ADD OUT PARTY ENTRY</button>
-            </div>
-          )}
         </section>
 
-        {/* MAIN LEDGER - HIGH DENSITY */}
-        <section className={`glass-card rounded-2xl overflow-hidden flex flex-col ${isLaptop ? 'master-glow' : ''}`}>
-          <div className="px-4 py-2 bg-white/5 border-b border-white/5 flex justify-between items-center">
-            <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Master Ledger Flow</h2>
+        {/* MAIN LEDGER: RIGHT SIDE ON DESKTOP */}
+        <section className={`flex-[3] glass-card rounded-lg overflow-hidden flex flex-col ${isLaptop ? 'master-glow' : ''}`}>
+          <div className="px-3 py-1.5 bg-white/5 border-b border-white/5 flex justify-between items-center flex-shrink-0">
+            <h2 className="text-[9px] font-black text-slate-500 uppercase tracking-widest">CASH FLOW</h2>
             <div className="flex gap-3 text-[9px] font-bold">
               <span className="text-sky-400">IN: {totals.mainCashInTotal.toLocaleString()}</span>
               <span className="text-red-400">OUT: {totals.mainCashOutTotal.toLocaleString()}</span>
             </div>
           </div>
+          
           <div className="table-container">
-            <table className="w-full text-left text-[11px] min-w-[700px] md:min-w-0">
+            <table className="w-full text-left text-[11px] border-collapse min-w-[500px] md:min-w-0">
               <thead>
-                <tr className="bg-slate-900/50">
-                  <th className="px-4 py-2 w-16">Room</th>
-                  <th className="px-4 py-2">Details</th>
-                  <th className="px-4 py-2 w-24">Type</th>
-                  <th className="px-4 py-2 w-28">Cash In</th>
-                  <th className="px-4 py-2 w-28">Cash Out</th>
-                  {isLaptop && <th className="px-4 py-2 w-10"></th>}
+                <tr>
+                  <th className="px-2 py-1.5 w-12">RM</th>
+                  <th className="px-2 py-1.5">Details</th>
+                  <th className="px-2 py-1.5 w-20">Type</th>
+                  <th className="px-2 py-1.5 w-24">Cash In</th>
+                  <th className="px-2 py-1.5 w-24">Cash Out</th>
+                  {isLaptop && <th className="px-2 py-1.5 w-8"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {appState.currentDay.mainEntries.map(e => (
-                  <tr key={e.id} className="hover:bg-white/[0.02]">
-                    <td className="px-4 py-1">
+                  <tr key={e.id} className="hover:bg-white/[0.03] group">
+                    <td className="px-2 py-0.5">
                       {isLaptop ? (
-                        <input value={e.roomNo} onChange={(ev) => updateMainEntry(e.id, 'roomNo', ev.target.value)} className="w-full bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none" placeholder="RM" />
-                      ) : <span className="font-bold opacity-70">{e.roomNo}</span>}
+                        <input value={e.roomNo} onChange={(ev) => updateMainEntry(e.id, 'roomNo', ev.target.value)} className="compact-input font-bold" placeholder="RM" />
+                      ) : <span className="font-black opacity-60 text-[10px]">{e.roomNo}</span>}
                     </td>
-                    <td className="px-4 py-1">
+                    <td className="px-2 py-0.5">
                       {isLaptop ? (
-                        <input value={e.description} onChange={(ev) => updateMainEntry(e.id, 'description', ev.target.value)} className="w-full bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none" placeholder="..." />
-                      ) : <span className="opacity-50 text-[10px]">{e.description}</span>}
+                        <input value={e.description} onChange={(ev) => updateMainEntry(e.id, 'description', ev.target.value)} className="compact-input text-slate-400" placeholder="..." />
+                      ) : <span className="opacity-40 text-[10px]">{e.description}</span>}
                     </td>
-                    <td className="px-4 py-1">
+                    <td className="px-2 py-0.5 text-center">
                        {isLaptop ? (
-                        <select value={e.method} onChange={(ev) => updateMainEntry(e.id, 'method', ev.target.value as PaymentMethod)} className="w-full bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
-                          <option value={PaymentMethod.CASH} className="bg-slate-900">CASH</option>
-                          <option value={PaymentMethod.CARD} className="bg-slate-900">CARD</option>
-                          <option value={PaymentMethod.PAYPAL} className="bg-slate-900">PAYPAL</option>
+                        <select value={e.method} onChange={(ev) => updateMainEntry(e.id, 'method', ev.target.value as PaymentMethod)} className="bg-transparent border-none text-[9px] font-black text-slate-500 p-0 outline-none">
+                          <option value={PaymentMethod.CASH} className="bg-slate-900 text-white">CSH</option>
+                          <option value={PaymentMethod.CARD} className="bg-slate-900 text-white">CRD</option>
+                          <option value={PaymentMethod.PAYPAL} className="bg-slate-900 text-white">PP</option>
                         </select>
                       ) : <span className="text-[9px] opacity-20">{e.method}</span>}
                     </td>
-                    <td className="px-4 py-1">
+                    <td className="px-2 py-0.5">
                       {isLaptop ? (
-                        <input type="number" value={e.cashIn || ''} onChange={(ev) => updateMainEntry(e.id, 'cashIn', Number(ev.target.value))} className="w-full bg-sky-500/5 text-sky-400 p-1 font-bold outline-none rounded" placeholder="0" />
-                      ) : <span className="text-sky-400 font-bold">{e.cashIn > 0 ? e.cashIn.toLocaleString() : ''}</span>}
+                        <input type="number" value={e.cashIn || ''} onChange={(ev) => updateMainEntry(e.id, 'cashIn', Number(ev.target.value))} className="compact-input font-bold text-sky-400 text-right" placeholder="0" />
+                      ) : <span className="text-sky-400 font-bold block text-right">{e.cashIn > 0 ? e.cashIn.toLocaleString() : '-'}</span>}
                     </td>
-                    <td className="px-4 py-1">
+                    <td className="px-2 py-0.5">
                       {isLaptop ? (
-                        <input type="number" value={e.cashOut || ''} onChange={(ev) => updateMainEntry(e.id, 'cashOut', Number(ev.target.value))} className="w-full bg-red-500/5 text-red-400 p-1 font-bold outline-none rounded" placeholder="0" />
-                      ) : <span className="text-red-400 font-bold">{e.cashOut > 0 ? e.cashOut.toLocaleString() : ''}</span>}
+                        <input type="number" value={e.cashOut || ''} onChange={(ev) => updateMainEntry(e.id, 'cashOut', Number(ev.target.value))} className="compact-input font-bold text-red-400 text-right" placeholder="0" />
+                      ) : <span className="text-red-400 font-bold block text-right">{e.cashOut > 0 ? e.cashOut.toLocaleString() : '-'}</span>}
                     </td>
                     {isLaptop && (
-                      <td className="px-4 py-1">
-                        <button onClick={() => deleteRecord(e.id, 'MAIN')} className="text-white/10 hover:text-red-500 transition-colors"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                      <td className="px-2 py-0.5 text-center">
+                        <button onClick={() => deleteRecord(e.id, 'MAIN')} className="text-white/10 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg></button>
                       </td>
                     )}
                   </tr>
@@ -413,43 +412,65 @@ const App: React.FC = () => {
               </tbody>
             </table>
           </div>
-          {isLaptop && (
-            <div className="p-2 border-t border-white/5 bg-slate-900/40">
-              <button onClick={addMainEntry} className="w-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-[10px] font-black py-2 rounded-lg transition-all border border-emerald-500/20">+ ADD FLOW ENTRY</button>
-            </div>
-          )}
-        </section>
-
-        {/* BOTTOM SUMMARY - FIXED HEIGHT */}
-        <section className="relative flex-shrink-0">
-          <div className="glass-card bg-slate-900/90 rounded-2xl p-4 md:p-6 border border-white/10 overflow-hidden">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="text-center md:text-left">
-                <p className="text-[9px] font-black text-sky-500 uppercase tracking-widest">Net Wallet Liquidity</p>
-                <p className="text-4xl md:text-6xl font-black text-white italic tabular-nums">Rs {totals.finalBalance.toLocaleString()}</p>
-              </div>
-              <div className="flex gap-2">
-                <button 
-                   onClick={() => {
-                     const s = appState.history.map(h => `${h.date}: Rs ${calculateTotals(h).finalBalance.toLocaleString()}`).join('\n');
-                     alert(`ARCHIVE:\n\n${s || 'Empty'}`);
-                   }}
-                   className="bg-white/5 border border-white/10 text-white text-[10px] font-black px-4 py-3 rounded-xl hover:bg-white/10 uppercase"
-                >History</button>
-                {isLaptop && (
-                  <button onClick={handleDayEnd} className="bg-white text-black text-[10px] font-black px-8 py-3 rounded-xl shadow-xl active:scale-95 uppercase italic">Day Close</button>
-                )}
-              </div>
-            </div>
-          </div>
         </section>
       </main>
 
-      <div className="fixed bottom-4 left-4 z-50 flex gap-2">
-         <div className="bg-black/60 backdrop-blur-lg px-3 py-1.5 rounded-full border border-white/5 text-[8px] font-bold text-slate-500 uppercase flex items-center gap-2">
-            <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-red-500'}`}></div>
-            ID: <span className="text-white">{appState.cabinId}</span>
-         </div>
+      {/* FOOTER ACTION BAR: PINNED TO BOTTOM */}
+      <footer className="glass-card border-x-0 border-b-0 p-3 flex-shrink-0 z-50">
+        <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-4">
+          
+          {/* BALANCE DISPLAY */}
+          <div className="flex-grow flex items-center gap-6">
+            <div className="flex flex-col">
+              <span className="text-[8px] font-black text-sky-500 uppercase tracking-widest mb-1">TOTAL NET LIQUIDITY (LKR)</span>
+              <span className="text-3xl md:text-4xl font-black text-white italic tracking-tighter tabular-nums leading-none">
+                {totals.finalBalance.toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          {/* MASTER ACTION BUTTONS: FIXED TO BOTTOM */}
+          <div className="flex items-center gap-2">
+            {isLaptop && (
+              <>
+                <button onClick={addOutParty} className="bg-sky-500 text-black text-[10px] font-black px-4 py-2.5 rounded-lg hover:bg-sky-400 transition-all active:scale-95 shadow-lg shadow-sky-500/20 uppercase">
+                  + OUT PARTY
+                </button>
+                <button onClick={addMainEntry} className="bg-emerald-500 text-black text-[10px] font-black px-4 py-2.5 rounded-lg hover:bg-emerald-400 transition-all active:scale-95 shadow-lg shadow-emerald-500/20 uppercase">
+                  + FLOW ENTRY
+                </button>
+                <div className="h-8 w-px bg-white/10 mx-1"></div>
+                <button onClick={handleDayEnd} className="bg-white text-black text-[10px] font-black px-6 py-2.5 rounded-lg hover:bg-slate-100 transition-all active:scale-95 shadow-xl uppercase italic">
+                  CLOSE DAY
+                </button>
+              </>
+            )}
+            {!isLaptop && (
+               <div className="bg-white/5 border border-white/10 text-white/50 text-[10px] font-black px-6 py-2.5 rounded-lg uppercase italic">
+                  LIVE VIEWER MODE
+               </div>
+            )}
+            
+            <button 
+               onClick={() => {
+                 const s = appState.history.map(h => `${h.date}: Rs ${calculateTotals(h).finalBalance.toLocaleString()}`).join('\n');
+                 alert(`ARCHIVE HISTORY:\n\n${s || 'No records yet.'}`);
+               }}
+               className="bg-white/5 border border-white/10 text-white text-[10px] font-black px-3 py-2.5 rounded-lg hover:bg-white/10 transition-all"
+               title="History"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </button>
+          </div>
+        </div>
+      </footer>
+
+      {/* SYNC STATUS TOAST */}
+      <div className="fixed bottom-2 right-2 pointer-events-none z-[100]">
+        <div className="bg-black/80 backdrop-blur-md px-2 py-1 rounded-md border border-white/5 text-[8px] font-bold text-slate-500 uppercase flex items-center gap-2 pointer-events-auto">
+           <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-red-500 animate-pulse'}`}></div>
+           ID: <span className="text-white">{appState.cabinId}</span>
+        </div>
       </div>
     </div>
   );
