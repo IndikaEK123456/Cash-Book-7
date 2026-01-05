@@ -302,9 +302,10 @@ const App: React.FC = () => {
         <section className={`flex-[2] glass-card rounded-lg overflow-hidden flex flex-col ${isLaptop ? 'master-glow' : ''}`}>
           <div className="px-3 py-1.5 bg-white/5 border-b border-white/5 flex justify-between items-center flex-shrink-0">
             <h2 className="text-[9px] font-black text-slate-500 uppercase tracking-widest">OUT PARTY</h2>
-            <div className="flex gap-3">
-               <span className="text-[9px] font-bold text-sky-400">CSH: {totals.opCash.toLocaleString()}</span>
-               <span className="text-[9px] font-bold text-yellow-500">CRD: {totals.opCard.toLocaleString()}</span>
+            <div className="flex gap-2">
+               <span className="text-[9px] font-bold text-sky-400 border border-white/5 px-1.5 py-0.5 rounded">CSH: {totals.opCash.toLocaleString()}</span>
+               <span className="text-[9px] font-bold text-yellow-500 border border-white/5 px-1.5 py-0.5 rounded">CRD: {totals.opCard.toLocaleString()}</span>
+               <span className="text-[9px] font-bold text-purple-400 border border-white/5 px-1.5 py-0.5 rounded">PP: {totals.opPaypal.toLocaleString()}</span>
             </div>
           </div>
           
@@ -329,7 +330,7 @@ const App: React.FC = () => {
                           <option value={PaymentMethod.CARD} className="bg-slate-900 text-white">CARD</option>
                           <option value={PaymentMethod.PAYPAL} className="bg-slate-900 text-white">PAYPAL</option>
                         </select>
-                      ) : <span className="text-[9px] font-black opacity-30 uppercase">{e.method}</span>}
+                      ) : <span className="text-[9px] font-black opacity-30 uppercase text-sky-400">{e.method}</span>}
                     </td>
                     <td className="px-2 py-0.5">
                       {isLaptop ? (
@@ -352,9 +353,12 @@ const App: React.FC = () => {
         <section className={`flex-[3] glass-card rounded-lg overflow-hidden flex flex-col ${isLaptop ? 'master-glow' : ''}`}>
           <div className="px-3 py-1.5 bg-white/5 border-b border-white/5 flex justify-between items-center flex-shrink-0">
             <h2 className="text-[9px] font-black text-slate-500 uppercase tracking-widest">CASH FLOW</h2>
-            <div className="flex gap-3 text-[9px] font-bold">
-              <span className="text-sky-400">IN: {totals.mainCashInTotal.toLocaleString()}</span>
-              <span className="text-red-400">OUT: {totals.mainCashOutTotal.toLocaleString()}</span>
+            <div className="flex gap-2 text-[9px] font-bold">
+              <span className="text-sky-400 border border-white/5 px-1.5 py-0.5 rounded">IN: {totals.mainCashInTotal.toLocaleString()}</span>
+              <span className="text-red-400 border border-white/5 px-1.5 py-0.5 rounded">OUT: {totals.mainCashOutTotal.toLocaleString()}</span>
+              <div className="w-px bg-white/10 mx-0.5"></div>
+              <span className="text-yellow-500 border border-yellow-500/20 px-1.5 py-0.5 rounded bg-yellow-500/5">CRD: {totals.mainCardOnly.toLocaleString()}</span>
+              <span className="text-purple-400 border border-purple-400/20 px-1.5 py-0.5 rounded bg-purple-400/5">PP: {totals.mainPaypalOnly.toLocaleString()}</span>
             </div>
           </div>
           
@@ -419,13 +423,26 @@ const App: React.FC = () => {
       <footer className="glass-card border-x-0 border-b-0 p-3 flex-shrink-0 z-50">
         <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-4">
           
-          {/* BALANCE DISPLAY */}
-          <div className="flex-grow flex items-center gap-6">
+          {/* BALANCE DISPLAY & AGGREGATED TOTALS */}
+          <div className="flex-grow flex flex-col md:flex-row items-center gap-6">
             <div className="flex flex-col">
               <span className="text-[8px] font-black text-sky-500 uppercase tracking-widest mb-1">TOTAL NET LIQUIDITY (LKR)</span>
               <span className="text-3xl md:text-4xl font-black text-white italic tracking-tighter tabular-nums leading-none">
                 {totals.finalBalance.toLocaleString()}
               </span>
+            </div>
+            
+            <div className="flex gap-4">
+               <div className="flex flex-col border-l border-white/10 pl-4">
+                  <span className="text-[7px] font-black text-yellow-500 uppercase mb-1">Aggregated Card</span>
+                  <span className="text-sm font-black text-yellow-500/80">Rs {totals.mainCardTotal.toLocaleString()}</span>
+                  <span className="text-[6px] opacity-30">({totals.opCard} OP + {totals.mainCardOnly} MAIN)</span>
+               </div>
+               <div className="flex flex-col border-l border-white/10 pl-4">
+                  <span className="text-[7px] font-black text-purple-400 uppercase mb-1">Aggregated PayPal</span>
+                  <span className="text-sm font-black text-purple-400/80">Rs {totals.mainPaypalTotal.toLocaleString()}</span>
+                  <span className="text-[6px] opacity-30">({totals.opPaypal} OP + {totals.mainPaypalOnly} MAIN)</span>
+               </div>
             </div>
           </div>
 
