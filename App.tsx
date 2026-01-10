@@ -32,13 +32,14 @@ const App: React.FC = () => {
     rates: { usd: DEFAULT_LKR_USD, euro: DEFAULT_LKR_EURO },
     isPaired: false
   });
+  const [viewHistory, setViewHistory] = useState<boolean>(false);
+  const [selectedHistoryDay, setSelectedHistoryDay] = useState<DailyData | null>(null);
 
   const peerRef = useRef<any>(null);
   const connectionsRef = useRef<any[]>([]);
   const stateRef = useRef(appState);
   const reconnectTimeoutRef = useRef<number | null>(null);
 
-  // Connectivity context tracking
   useEffect(() => {
     stateRef.current = appState;
   }, [appState]);
@@ -243,6 +244,14 @@ const App: React.FC = () => {
     }));
   };
 
+  const getMethodColor = (method: PaymentMethod) => {
+    switch(method) {
+      case PaymentMethod.CARD: return 'text-yellow-400';
+      case PaymentMethod.PAYPAL: return 'text-purple-400';
+      default: return 'text-sky-400';
+    }
+  };
+
   if (isInitializing) return null;
 
   // --- LOGIN ---
@@ -308,7 +317,7 @@ const App: React.FC = () => {
             <h2 className="text-[9px] font-black text-slate-500 uppercase tracking-widest">OUT PARTY</h2>
             <div className="flex gap-2">
                <span className="text-[9px] font-bold text-sky-400 border border-white/5 px-1.5 py-0.5 rounded">CSH: {totals.opCash.toLocaleString()}</span>
-               <span className="text-[9px] font-bold text-yellow-500 border border-white/5 px-1.5 py-0.5 rounded">CRD: {totals.opCard.toLocaleString()}</span>
+               <span className="text-[9px] font-bold text-yellow-400 border border-white/5 px-1.5 py-0.5 rounded">CRD: {totals.opCard.toLocaleString()}</span>
                <span className="text-[9px] font-bold text-purple-400 border border-white/5 px-1.5 py-0.5 rounded">PP: {totals.opPaypal.toLocaleString()}</span>
             </div>
           </div>
@@ -329,12 +338,12 @@ const App: React.FC = () => {
                     <td className="px-2 py-0.5 text-slate-600 font-bold">{i + 1}</td>
                     <td className="px-2 py-0.5">
                       {isLaptop ? (
-                        <select value={e.method} onChange={(ev) => updateOutParty(e.id, 'method', ev.target.value as PaymentMethod)} className="bg-transparent border-none text-[10px] font-bold text-sky-400 p-0 outline-none">
+                        <select value={e.method} onChange={(ev) => updateOutParty(e.id, 'method', ev.target.value as PaymentMethod)} className={`bg-transparent border-none text-[10px] font-bold ${getMethodColor(e.method)} p-0 outline-none`}>
                           <option value={PaymentMethod.CASH} className="bg-slate-900 text-white">CASH</option>
                           <option value={PaymentMethod.CARD} className="bg-slate-900 text-white">CARD</option>
                           <option value={PaymentMethod.PAYPAL} className="bg-slate-900 text-white">PAYPAL</option>
                         </select>
-                      ) : <span className="text-[9px] font-black opacity-30 uppercase text-sky-400">{e.method}</span>}
+                      ) : <span className={`text-[9px] font-black opacity-60 uppercase ${getMethodColor(e.method)}`}>{e.method}</span>}
                     </td>
                     <td className="px-2 py-0.5">
                       {isLaptop ? (
@@ -361,7 +370,7 @@ const App: React.FC = () => {
               <span className="text-sky-400 border border-white/5 px-1.5 py-0.5 rounded">IN: {totals.mainCashInTotal.toLocaleString()}</span>
               <span className="text-red-400 border border-white/5 px-1.5 py-0.5 rounded">OUT: {totals.mainCashOutTotal.toLocaleString()}</span>
               <div className="w-px bg-white/10 mx-0.5"></div>
-              <span className="text-yellow-500 border border-yellow-500/20 px-1.5 py-0.5 rounded bg-yellow-500/5">CRD: {totals.mainCardOnly.toLocaleString()}</span>
+              <span className="text-yellow-400 border border-yellow-400/20 px-1.5 py-0.5 rounded bg-yellow-400/5">CRD: {totals.mainCardOnly.toLocaleString()}</span>
               <span className="text-purple-400 border border-purple-400/20 px-1.5 py-0.5 rounded bg-purple-400/5">PP: {totals.mainPaypalOnly.toLocaleString()}</span>
             </div>
           </div>
@@ -393,12 +402,12 @@ const App: React.FC = () => {
                     </td>
                     <td className="px-2 py-0.5 text-center">
                        {isLaptop ? (
-                        <select value={e.method} onChange={(ev) => updateMainEntry(e.id, 'method', ev.target.value as PaymentMethod)} className="bg-transparent border-none text-[9px] font-black text-slate-500 p-0 outline-none">
+                        <select value={e.method} onChange={(ev) => updateMainEntry(e.id, 'method', ev.target.value as PaymentMethod)} className={`bg-transparent border-none text-[9px] font-black ${getMethodColor(e.method)} p-0 outline-none`}>
                           <option value={PaymentMethod.CASH} className="bg-slate-900 text-white">CSH</option>
                           <option value={PaymentMethod.CARD} className="bg-slate-900 text-white">CRD</option>
                           <option value={PaymentMethod.PAYPAL} className="bg-slate-900 text-white">PP</option>
                         </select>
-                      ) : <span className="text-[9px] opacity-20">{e.method}</span>}
+                      ) : <span className={`text-[9px] font-black opacity-60 ${getMethodColor(e.method)}`}>{e.method === PaymentMethod.CASH ? 'CSH' : e.method === PaymentMethod.CARD ? 'CRD' : 'PP'}</span>}
                     </td>
                     <td className="px-2 py-0.5">
                       {isLaptop ? (
@@ -438,8 +447,8 @@ const App: React.FC = () => {
             
             <div className="flex gap-4">
                <div className="flex flex-col border-l border-white/10 pl-4">
-                  <span className="text-[7px] font-black text-yellow-500 uppercase mb-1">Aggregated Card</span>
-                  <span className="text-sm font-black text-yellow-500/80">Rs {totals.mainCardTotal.toLocaleString()}</span>
+                  <span className="text-[7px] font-black text-yellow-400 uppercase mb-1">Aggregated Card</span>
+                  <span className="text-sm font-black text-yellow-400/80">Rs {totals.mainCardTotal.toLocaleString()}</span>
                   <span className="text-[6px] opacity-30">({totals.opCard} OP + {totals.mainCardOnly} MAIN)</span>
                </div>
                <div className="flex flex-col border-l border-white/10 pl-4">
@@ -473,10 +482,7 @@ const App: React.FC = () => {
             )}
             
             <button 
-               onClick={() => {
-                 const s = appState.history.map(h => `${h.date}: Rs ${calculateTotals(h).finalBalance.toLocaleString()}`).join('\n');
-                 alert(`ARCHIVE HISTORY:\n\n${s || 'No records yet.'}`);
-               }}
+               onClick={() => setViewHistory(true)}
                className="bg-white/5 border border-white/10 text-white text-[10px] font-black px-3 py-2.5 rounded-lg hover:bg-white/10 transition-all"
                title="History"
             >
@@ -485,6 +491,115 @@ const App: React.FC = () => {
           </div>
         </div>
       </footer>
+
+      {/* HISTORY OVERLAY */}
+      {viewHistory && (
+        <div className="fixed inset-0 bg-[#020617]/95 backdrop-blur-xl z-[200] flex flex-col p-4 overflow-hidden">
+          <div className="flex items-center justify-between mb-6 border-b border-white/10 pb-4">
+            <h2 className="text-2xl font-black italic uppercase tracking-tighter">Day End Archives</h2>
+            <button onClick={() => { setViewHistory(false); setSelectedHistoryDay(null); }} className="bg-white/5 p-2 rounded-full hover:bg-red-500 transition-colors">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+          
+          <div className="flex flex-col md:flex-row gap-4 flex-1 overflow-hidden">
+            {/* List of Archived Days */}
+            <div className="w-full md:w-64 overflow-y-auto pr-2 space-y-2 no-scrollbar">
+              {appState.history.length === 0 ? (
+                <p className="text-slate-500 text-xs text-center py-10 italic">No historical records found.</p>
+              ) : (
+                appState.history.map((h, i) => (
+                  <button 
+                    key={i} 
+                    onClick={() => setSelectedHistoryDay(h)}
+                    className={`w-full text-left p-4 rounded-xl transition-all border ${selectedHistoryDay?.date === h.date ? 'bg-sky-500 border-sky-400 text-black' : 'bg-white/5 border-white/10 text-white hover:bg-white/10'}`}
+                  >
+                    <p className="text-[10px] font-black uppercase opacity-60">Archive Record</p>
+                    <p className="text-lg font-black">{h.date}</p>
+                    <p className={`text-[11px] font-bold ${selectedHistoryDay?.date === h.date ? 'text-black/60' : 'text-sky-400'}`}>Rs {calculateTotals(h).finalBalance.toLocaleString()}</p>
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Detailed Breakdown */}
+            <div className="flex-1 glass-card rounded-2xl p-4 overflow-y-auto no-scrollbar border border-white/10">
+              {selectedHistoryDay ? (
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-white/5 pb-4">
+                    <div>
+                      <p className="text-[10px] font-black text-sky-500 uppercase tracking-widest">Detail Report for</p>
+                      <h3 className="text-4xl font-black italic tracking-tighter leading-none">{selectedHistoryDay.date}</h3>
+                    </div>
+                    <div className="mt-4 md:mt-0 text-right">
+                       <p className="text-[8px] font-black text-slate-500 uppercase">Closing Net Liquidity</p>
+                       <p className="text-3xl font-black text-white italic">Rs {calculateTotals(selectedHistoryDay).finalBalance.toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5 pb-1">Out Party Breakdown</h4>
+                      <div className="space-y-1">
+                        {selectedHistoryDay.outPartyEntries.map((e, idx) => (
+                          <div key={idx} className="flex justify-between items-center bg-white/5 p-2 rounded text-xs">
+                             <span className={`font-black uppercase text-[9px] ${getMethodColor(e.method)}`}>{e.method}</span>
+                             <span className="font-bold">Rs {e.amount.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5 pb-1">Cash Flow Breakdown</h4>
+                      <div className="space-y-1">
+                        {selectedHistoryDay.mainEntries.map((e, idx) => (
+                          <div key={idx} className="flex flex-col bg-white/5 p-2 rounded text-xs">
+                             <div className="flex justify-between mb-1">
+                                <span className="font-black text-[10px] uppercase opacity-40">RM {e.roomNo}</span>
+                                <span className={`font-black uppercase text-[8px] opacity-60 ${getMethodColor(e.method)}`}>{e.method}</span>
+                             </div>
+                             <div className="flex justify-between">
+                                <span className="opacity-50">{e.description}</span>
+                                <div className="flex gap-4">
+                                   {e.cashIn > 0 && <span className="text-sky-400 font-bold">+{e.cashIn.toLocaleString()}</span>}
+                                   {e.cashOut > 0 && <span className="text-red-400 font-bold">-{e.cashOut.toLocaleString()}</span>}
+                                </div>
+                             </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-sky-500/5 border border-sky-500/20 p-4 rounded-xl grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-[8px] font-black opacity-40 uppercase">Card Aggregated</p>
+                      <p className="text-lg font-black text-yellow-400">Rs {calculateTotals(selectedHistoryDay).mainCardTotal.toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-black opacity-40 uppercase">PayPal Aggregated</p>
+                      <p className="text-lg font-black text-purple-400">Rs {calculateTotals(selectedHistoryDay).mainPaypalTotal.toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-black opacity-40 uppercase">Total Cash In</p>
+                      <p className="text-lg font-black text-sky-400">Rs {calculateTotals(selectedHistoryDay).mainCashInTotal.toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-black opacity-40 uppercase">Total Cash Out</p>
+                      <p className="text-lg font-black text-red-400">Rs {calculateTotals(selectedHistoryDay).mainCashOutTotal.toLocaleString()}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-center p-10 opacity-20">
+                   <svg className="w-20 h-20 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                   <p className="text-xl font-black italic uppercase italic">Select an archive to view full details</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SYNC STATUS TOAST */}
       <div className="fixed bottom-2 right-2 pointer-events-none z-[100]">
